@@ -56,10 +56,6 @@ int report_usage(const char* detail) {
   return 2;
 }
 
-Error helper_error(const char* condition, std::string detail) {
-  return fail(ErrorCategory::Invalid, std::string("csp.helper.") + condition, std::move(detail));
-}
-
 std::size_t parse_wait(const char* text, bool& ok) {
   char* end = nullptr;
   const unsigned long long parsed = std::strtoull(text, &end, 10);
@@ -96,6 +92,14 @@ StoreOptions options_for(const std::string& directory, std::size_t wait_ms) {
 }
 
 #if defined(_WIN32)
+
+/// Windows reports a path that is not valid UTF-8 before it tries to open it; the POSIX
+/// branch has no such step, so this helper has exactly one user and lives in the branch
+/// that has it. A definition outside both branches would be an unused function on POSIX,
+/// which is a warning, and warnings are errors here.
+Error helper_error(const char* condition, std::string detail) {
+  return fail(ErrorCategory::Invalid, std::string("csp.helper.") + condition, std::move(detail));
+}
 
 std::wstring to_wide(const std::string& text) {
   if (text.empty()) {
