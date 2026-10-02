@@ -17,8 +17,8 @@ namespace csp {
 
 inline constexpr int kVersionMajor = 1;
 inline constexpr int kVersionMinor = 0;
-inline constexpr int kVersionPatch = 0;
-inline constexpr const char* kVersionString = "1.0.0";
+inline constexpr int kVersionPatch = 1;
+inline constexpr const char* kVersionString = "1.0.1";
 
 /// Format of the textual documents this boundary reads and writes (requests,
 /// evidence snapshots, policies, plans). A reader accepts exactly the versions it
@@ -34,10 +34,10 @@ inline constexpr int kStoreFormatVersion = 1;
 inline constexpr int kMinReadableDocumentVersion = 1;
 inline constexpr int kMaxReadableDocumentVersion = 1;
 
-/// "cross-site-placement 1.0.0"
+/// "cross-site-placement 1.0.1"
 const char* library_version() noexcept;
 
-/// "cross-site-placement 1.0.0 (document format 1, store format 1)"
+/// "cross-site-placement 1.0.1 (document format 1, store format 1)"
 std::string version_banner();
 
 }  // namespace csp
