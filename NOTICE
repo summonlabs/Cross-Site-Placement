@@ -1,0 +1,50 @@
+Cross-Site Placement
+Copyright 2026 Summon Software Labs
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Cross-Site Placement is the deterministic cross-site placement planning and
+explanation authority for the Data Center Control Plane. It answers one question:
+given candidate sites and explicit authoritative evidence, where should an
+obligation be placed so that physical, policy, latency/dependency,
+failure-independence, and recoverability constraints are satisfied? It is built
+from the C++20 standard library only.
+
+Third-party components
+----------------------
+
+None. No third-party source code, library, header, or generated artefact is
+included in, linked into, or required by this product.
+
+The build depends only on the platform's own toolchain and operating system:
+
+  * the C++20 standard library of the toolchain that builds the project;
+  * the operating system's file, locking, and process primitives, used for the
+    durable plan store and reached through the platform API (CreateFileW,
+    LockFileEx, MoveFileExW, and FlushFileBuffers on Windows; open, flock, fsync,
+    and rename elsewhere).
+
+No network service, telemetry endpoint, analytics library, or runtime package
+manager is contacted or required at build time or at run time.
+
+What this product is not
+------------------------
+
+It is not a capacity broker, a reservation authority, a scheduler, a route
+planner, or a disaster-recovery executor, and it does not claim to be. It does
+not own site-capacity truth, failure-domain truth, network measurement, or global
+policy; it consumes references to all of them and refuses to invent what it was
+not given. A plan produced here is a proposal: it reserves nothing, consumes no
+capacity, and installs nothing.
+
+It is not a physical hardware controller and does not claim any hardware proof.
+Its benchmarks are labelled SYNTHETIC because they are generated from a fixed
+seed on the machine that ran them. Where a claim rests on an operating-system
+facility rather than on hardware, it is stated as such.
+
+Trademarks
+----------
+
+All product names, trademarks, and registered trademarks mentioned in this
+repository are the property of their respective owners and are used only for
+identification purposes.

@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+# The library uses the C++20 standard library and the platform's threading support and
+# nothing else, but it does use std::thread for bounded parallel candidate evaluation, so
+# a consumer has to link the platform's thread library on the platforms that need it.
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/CrossSitePlacementTargets.cmake")
+
+check_required_components(CrossSitePlacement)

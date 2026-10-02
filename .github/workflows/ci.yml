@@ -1,0 +1,198 @@
+# Continuous integration.
+#
+# No job sets timeout-minutes, and no test target carries a CTest TIMEOUT property. A
+# hanging test is a defect to diagnose; killing it and reporting the run as finished would
+# convert that defect into a green build, which is the opposite of what this repository is
+# for.
+#
+# Every job builds and tests Debug and Release where the platform makes that meaningful,
+# and the Linux jobs additionally run the suite under AddressSanitizer and
+# UndefinedBehaviorSanitizer. First-party code is compiled with warnings as errors in every
+# job, so a warning fails the build rather than scrolling past.
+
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-gcc:
+    name: Ubuntu / GCC
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [ Release, Debug ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER=g++
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=ON -DCSP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Benchmark (synthetic, small scale)
+        run: ./build/benchmarks/csp-benchmark --scale=small
+
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -B build -G TGZ
+
+  linux-clang:
+    name: Ubuntu / Clang
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [ Release, Debug ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=ON -DCSP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  linux-sanitizers:
+    name: Ubuntu / GCC / ASan+UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_CXX_COMPILER=g++
+          -DCSP_SANITIZE=address+undefined
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+        run: ctest --test-dir build --output-on-failure
+
+  windows-msvc:
+    name: Windows / MSVC
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [ Release, Debug ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=ON -DCSP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Benchmark (synthetic, small scale)
+        run: ./build/benchmarks/csp-benchmark.exe --scale=small
+
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -B build -G ZIP
+
+  windows-msvc-asan:
+    name: Windows / MSVC / AddressSanitizer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCSP_SANITIZE=address
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  downstream-consumer:
+    name: Installed package / downstream consumer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSP_BUILD_TESTS=OFF -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=OFF
+          -DCSP_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install
+        run: cmake --install build --prefix "${{ github.workspace }}/prefix"
+
+      - name: Configure the consumer against the install tree only
+        run: >
+          cmake -S examples/consumer -B consumer-build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ github.workspace }}/prefix"
+
+      - name: Build the consumer
+        run: cmake --build consumer-build
+
+      - name: Run the consumer
+        shell: bash
+        run: |
+          if [ -f consumer-build/csp-consumer.exe ]; then
+            ./consumer-build/csp-consumer.exe
+          else
+            ./consumer-build/csp-consumer
+          fi
