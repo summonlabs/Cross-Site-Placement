@@ -279,11 +279,14 @@ Fleet rich_fleet() {
 
   Obligation& obligation = fleet.add_obligation("obligation-1", "payments", 4);
   fleet.request.preferences.objectives.push_back(Preferences::Objective::MinimiseCost);
-  SeparationRequirement separation;
+  // Built in place rather than copied from a local. Both shapes are correct, but copying a
+  // record that holds a vector of one-byte enumerators routes the copy through memmove,
+  // and GCC 13 at -O3 misreads that memmove as an out-of-bounds access and fails the build
+  // under -Werror. Constructing in place never reaches that analysis, and reads better.
+  SeparationRequirement& separation = obligation.separations.emplace_back();
   separation.group = SeparationGroup::All;
   separation.separated_kinds.push_back(DomainKind::Power);
-  obligation.separations.push_back(separation);
-  LatencyRequirement latency;
+  LatencyRequirement& latency = obligation.latency_requirements.emplace_back();
   latency.peer.kind = DependencyEndpoint::Kind::SiteService;
   latency.peer.site = id_of<SiteId>("site-c");
   latency.peer.service_class = id_of<ServiceClassId>("payments");
@@ -291,7 +294,6 @@ Fleet rich_fleet() {
   latency.statistic = LatencyStatistic::Max;
   latency.max_latency = Duration::from_nanos(5000000);
   latency.applies_to = PlacementRole::Primary;
-  obligation.latency_requirements.push_back(latency);
   return fleet;
 }
 
@@ -952,20 +954,18 @@ CSP_TEST(placement, request_validation_refusals) {
                  "csp.request.empty_separation");
 
   PlacementRequest self_dependency = fleet.request;
-  LatencyRequirement self;
+  LatencyRequirement& self = self_dependency.obligations.front().latency_requirements.emplace_back();
   self.peer.kind = DependencyEndpoint::Kind::Obligation;
   self.peer.obligation = fleet.request.obligations.front().obligation;
   self.max_latency = Duration::from_nanos(1000);
-  self_dependency.obligations.front().latency_requirements.push_back(self);
   EXPECT_FAILURE(request_validate(self_dependency, limits), ErrorCategory::Invalid,
                  "csp.request.self_dependency");
 
   PlacementRequest unknown_peer = fleet.request;
-  LatencyRequirement dangling;
+  LatencyRequirement& dangling = unknown_peer.obligations.front().latency_requirements.emplace_back();
   dangling.peer.kind = DependencyEndpoint::Kind::Obligation;
   dangling.peer.obligation = id_of<ObligationId>("obligation-absent");
   dangling.max_latency = Duration::from_nanos(1000);
-  unknown_peer.obligations.front().latency_requirements.push_back(dangling);
   EXPECT_FAILURE(request_validate(unknown_peer, limits), ErrorCategory::NotFound,
                  "csp.request.unknown_peer_obligation");
 
@@ -976,12 +976,11 @@ CSP_TEST(placement, request_validation_refusals) {
                  "csp.request.duplicate_site");
 
   PlacementRequest negative_latency = fleet.request;
-  LatencyRequirement backwards;
+  LatencyRequirement& backwards = negative_latency.obligations.front().latency_requirements.emplace_back();
   backwards.peer.kind = DependencyEndpoint::Kind::SiteService;
   backwards.peer.site = id_of<SiteId>("site-a");
   backwards.peer.service_class = id_of<ServiceClassId>("payments");
   backwards.max_latency = Duration::from_nanos(-1);
-  negative_latency.obligations.front().latency_requirements.push_back(backwards);
   EXPECT_FAILURE(request_validate(negative_latency, limits), ErrorCategory::OutOfRange,
                  "csp.request.negative_latency");
 
