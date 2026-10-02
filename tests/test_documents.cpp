@@ -594,7 +594,8 @@ CSP_TEST(documents, snapshot_document_pretty_form_decodes_to_the_same_value) {
 }
 
 CSP_TEST(documents, snapshot_decoder_refusals_carry_the_documented_category) {
-  const Limits limits;
+  // Each refusal below is made against the default limits unless it is specifically about
+  // a lowered bound, so there is no shared Limits object to carry here.
   const SiteEvidenceSnapshot sample = sample_snapshot();
   const Result<std::string> canonical = snapshot_to_document(sample, false);
   CSP_REQUIRE(canonical.has_value());

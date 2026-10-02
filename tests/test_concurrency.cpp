@@ -274,15 +274,18 @@ CSP_TEST(concurrency, many_threads_planning_one_immutable_snapshot_agree) {
   const std::string expected = canonical(baseline.value());
 
   const std::size_t thread_count = 8;
-  const std::size_t calls_per_thread = 8;
+  // constexpr, so the worker below reads it as a constant expression and does not need to
+  // capture it. A capture that is not required is a warning under Clang, and warnings are
+  // errors here.
+  constexpr std::size_t calls_per_thread = 8;
   const std::size_t total = thread_count * calls_per_thread;
   std::vector<std::string> results(total);
   std::vector<std::string> failures(total);
   std::vector<std::thread> workers;
   workers.reserve(thread_count);
   for (std::size_t worker = 0; worker < thread_count; ++worker) {
-    workers.emplace_back([&planner, &request, &snapshot, &policy, &context, &results, &failures, expected, worker,
-                          calls_per_thread]() {
+    workers.emplace_back([&planner, &request, &snapshot, &policy, &context, &results, &failures, expected,
+                          worker]() {
       for (std::size_t call = 0; call < calls_per_thread; ++call) {
         const std::size_t slot = worker * calls_per_thread + call;
         Result<PlacementPlan> planned = planner.plan(request, snapshot, policy, context);

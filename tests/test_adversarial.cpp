@@ -1277,8 +1277,11 @@ CSP_TEST(adversarial, corrupt_manifest_refuses_to_open_without_truncating) {
   const std::string original = read_bytes(manifest);
   CSP_REQUIRE(!original.empty());
 
-  const auto refuses_with = [&scratch, &manifest, &original](const std::string& bytes, ErrorCategory category,
-                                                              const char* code, const char* what) {
+  // original is deliberately not captured: the check below is that the manifest still
+  // holds exactly the bytes that were just written, which is a stronger statement than
+  // that it holds the bytes it held before the test started.
+  const auto refuses_with = [&scratch, &manifest](const std::string& bytes, ErrorCategory category,
+                                                  const char* code, const char* what) {
     CSP_REQUIRE(write_bytes(manifest, bytes));
     Result<PlanStore> refused = PlanStore::open(options_for(scratch.path()));
     CSP_EXPECT_MSG(!refused.has_value(), std::string(what) + ": the store opened anyway");

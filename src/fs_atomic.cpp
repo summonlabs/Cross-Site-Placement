@@ -77,7 +77,16 @@ constexpr std::size_t kReadChunk = 1U << 16U;
 /// any caller has.
 constexpr std::int64_t kLongestWaitMs = 100LL * 365LL * 24LL * 60LL * 60LL * 1000LL;
 
-std::string quoted(const std::string& value) {
+/// Wraps a path in double quotes for an error message.
+///
+/// The name is deliberately not quoted. A free function called quoted taking a
+/// std::string is a trap: for a non-const std::string lvalue, argument-dependent lookup
+/// adds std::quoted to the candidate set, and that overload binds basic_string& by
+/// identity where this one needs a qualification conversion - so the manipulator wins,
+/// and the result cannot be concatenated to a string. That is a compile error on any
+/// standard library that provides std::quoted; it went unnoticed here only because the
+/// branch that called it that way is the POSIX one, which a Windows build never compiles.
+std::string path_quoted(const std::string& value) {
   std::string out;
   out.reserve(value.size() + 2);
   out.push_back('"');
@@ -326,13 +335,13 @@ Status remove_tree_wide(const std::wstring& target) {
     return success();
   }
   if (self.kind == EntryKind::Failure) {
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot read the attributes of " + quoted(show(target)),
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot read the attributes of " + path_quoted(show(target)),
                     platform_error_text(self.error));
   }
   if ((self.attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
     unsigned long failure = 0;
     if (!remove_link_wide(target, self.attributes, failure)) {
-      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the link " + quoted(show(target)),
+      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the link " + path_quoted(show(target)),
                       platform_error_text(failure));
     }
     return success();
@@ -340,7 +349,7 @@ Status remove_tree_wide(const std::wstring& target) {
   if (self.kind != EntryKind::Directory) {
     unsigned long failure = 0;
     if (!delete_file_wide(target, failure)) {
-      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the file " + quoted(show(target)),
+      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the file " + path_quoted(show(target)),
                       platform_error_text(failure));
     }
     return success();
@@ -358,7 +367,7 @@ Status remove_tree_wide(const std::wstring& target) {
     const unsigned long code = static_cast<unsigned long>(GetLastError());
     // An empty directory can surface here as "no files", which is not an error.
     if (code != ERROR_FILE_NOT_FOUND) {
-      return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + quoted(show(target)),
+      return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + path_quoted(show(target)),
                       platform_error_text(code));
     }
   } else {
@@ -383,7 +392,7 @@ Status remove_tree_wide(const std::wstring& target) {
         const unsigned long code = static_cast<unsigned long>(GetLastError());
         FindClose(search);
         if (code != ERROR_NO_MORE_FILES) {
-          return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + quoted(show(target)),
+          return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + path_quoted(show(target)),
                           platform_error_text(code));
         }
         break;
@@ -392,7 +401,7 @@ Status remove_tree_wide(const std::wstring& target) {
   }
 
   if (RemoveDirectoryW(target.c_str()) == 0) {
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the directory " + quoted(show(target)),
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the directory " + path_quoted(show(target)),
                     platform_error_text(static_cast<unsigned long>(GetLastError())));
   }
   return success();
@@ -413,12 +422,12 @@ Status create_one_directory(const std::wstring& prefix, const std::string& desti
     }
     if (existing.kind == EntryKind::File || existing.kind == EntryKind::Other) {
       return fs_error(ErrorCategory::Conflict, "conflict",
-                      "cannot create the directory " + quoted(show(prefix)) + " on the way to " + quoted(destination),
+                      "cannot create the directory " + path_quoted(show(prefix)) + " on the way to " + path_quoted(destination),
                       "an entry that is not a directory already exists at that name");
     }
   }
   return fs_error(ErrorCategory::Io, "mkdir",
-                  "cannot create the directory " + quoted(show(prefix)) + " on the way to " + quoted(destination),
+                  "cannot create the directory " + path_quoted(show(prefix)) + " on the way to " + path_quoted(destination),
                   platform_error_text(code));
 }
 
@@ -481,20 +490,20 @@ Status remove_tree_path(const std::string& target) {
     if (code == ENOENT || code == ENOTDIR) {
       return success();
     }
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot read the attributes of " + quoted(target),
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot read the attributes of " + path_quoted(target),
                     platform_error_text(code));
   }
   if (S_ISLNK(info.st_mode) || (!S_ISDIR(info.st_mode) && !S_ISREG(info.st_mode))) {
     // A symbolic link is removed as a link; its target is never visited.
     if (unlink(target.c_str()) != 0) {
-      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the link " + quoted(target),
+      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the link " + path_quoted(target),
                       platform_error_text(errno));
     }
     return success();
   }
   if (!S_ISDIR(info.st_mode)) {
     if (unlink(target.c_str()) != 0) {
-      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the file " + quoted(target),
+      return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the file " + path_quoted(target),
                       platform_error_text(errno));
     }
     return success();
@@ -502,7 +511,7 @@ Status remove_tree_path(const std::string& target) {
 
   DIR* directory = opendir(target.c_str());
   if (directory == nullptr) {
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + quoted(target), platform_error_text(errno));
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + path_quoted(target), platform_error_text(errno));
   }
   for (;;) {
     errno = 0;
@@ -528,11 +537,11 @@ Status remove_tree_path(const std::string& target) {
   const int read_error = errno;
   closedir(directory);
   if (read_error != 0) {
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + quoted(target),
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot enumerate " + path_quoted(target),
                     platform_error_text(read_error));
   }
   if (rmdir(target.c_str()) != 0) {
-    return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the directory " + quoted(target),
+    return fs_error(ErrorCategory::Io, "remove_tree", "cannot remove the directory " + path_quoted(target),
                     platform_error_text(errno));
   }
   return success();
@@ -551,13 +560,13 @@ Status create_one_directory(const std::string& prefix, const std::string& destin
       }
       if (S_ISREG(info.st_mode) || S_ISLNK(info.st_mode)) {
         return fs_error(ErrorCategory::Conflict, "conflict",
-                        "cannot create the directory " + quoted(prefix) + " on the way to " + quoted(destination),
+                        "cannot create the directory " + path_quoted(prefix) + " on the way to " + path_quoted(destination),
                         "an entry that is not a directory already exists at that name");
       }
     }
   }
   return fs_error(ErrorCategory::Io, "mkdir",
-                  "cannot create the directory " + quoted(prefix) + " on the way to " + quoted(destination),
+                  "cannot create the directory " + path_quoted(prefix) + " on the way to " + path_quoted(destination),
                   platform_error_text(code));
 }
 
@@ -676,7 +685,7 @@ FileLock& FileLock::operator=(FileLock&& other) noexcept {
 
 Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOptions& options) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot lock " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot lock " + path_quoted(path), "the path is empty");
   }
 
   auto impl = std::make_shared<Impl>(path);
@@ -684,7 +693,7 @@ Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOption
 #if defined(_WIN32)
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot lock " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot lock " + path_quoted(path), "the path is not valid UTF-8");
   }
   // Read and write sharing lets other processes open the lock file while this
   // one holds the region lock; withholding FILE_SHARE_DELETE keeps the name
@@ -693,7 +702,7 @@ Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOption
                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (impl->handle == INVALID_HANDLE_VALUE) {
     const unsigned long failure = static_cast<unsigned long>(GetLastError());
-    return fs_error(ErrorCategory::Io, "lock.open", "cannot open the lock file " + quoted(path),
+    return fs_error(ErrorCategory::Io, "lock.open", "cannot open the lock file " + path_quoted(path),
                     platform_error_text(failure));
   }
   unsigned long failure = 0;
@@ -701,7 +710,7 @@ Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOption
   impl->descriptor = ::open(path.c_str(), O_RDWR | O_CREAT, 0666);
   if (impl->descriptor < 0) {
     const int failure = errno;
-    return fs_error(ErrorCategory::Io, "lock.open", "cannot open the lock file " + quoted(path),
+    return fs_error(ErrorCategory::Io, "lock.open", "cannot open the lock file " + path_quoted(path),
                     platform_error_text(failure));
   }
   int failure = 0;
@@ -719,7 +728,7 @@ Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOption
       return Result<FileLock>(std::move(lock));
     }
     if (attempt == Impl::Attempt::Failed) {
-      return fs_error(ErrorCategory::Io, "lock.acquire", "cannot lock " + quoted(path),
+      return fs_error(ErrorCategory::Io, "lock.acquire", "cannot lock " + path_quoted(path),
                       platform_error_text(failure));
     }
 
@@ -731,7 +740,7 @@ Result<FileLock> FileLock::acquire(const std::string& path, const FileLockOption
       detail += " ms of a ";
       detail += std::to_string(budget.count());
       detail += " ms budget for the exclusive lock on ";
-      detail += quoted(path);
+      detail += path_quoted(path);
       return fail(ErrorCategory::Locked, "csp.lock.timeout", std::move(detail));
     }
 
@@ -766,13 +775,13 @@ void FileLock::release() noexcept {
 
 Status write_file_durable(const std::string& path, std::string_view bytes) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + path_quoted(path), "the path is empty");
   }
 
 #if defined(_WIN32)
   std::wstring wide_destination;
   if (!to_wide(path, wide_destination)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + path_quoted(path), "the path is not valid UTF-8");
   }
 #else
   const std::string& wide_destination = path;
@@ -782,7 +791,7 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
   std::string name;
   split_path(path, directory, name);
   if (name.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + quoted(path),
+    return fs_error(ErrorCategory::Invalid, "path", "cannot write " + path_quoted(path),
                     "the path names a directory, not a file");
   }
 
@@ -815,7 +824,7 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
     const std::string candidate = directory + name + staging_token();
     std::wstring wide_candidate;
     if (!to_wide(candidate, wide_candidate)) {
-      return fs_error(ErrorCategory::Invalid, "path", "cannot stage a write of " + quoted(path),
+      return fs_error(ErrorCategory::Invalid, "path", "cannot stage a write of " + path_quoted(path),
                       "the staging path is not valid UTF-8");
     }
     staging.handle = CreateFileW(wide_candidate.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
@@ -826,14 +835,14 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
     }
     failure = static_cast<unsigned long>(GetLastError());
     if (failure != ERROR_FILE_EXISTS && failure != ERROR_ALREADY_EXISTS) {
-      return fs_error(ErrorCategory::Io, "staging_create", "cannot create a staging file for " + quoted(path),
+      return fs_error(ErrorCategory::Io, "staging_create", "cannot create a staging file for " + path_quoted(path),
                       platform_error_text(failure));
     }
     // That name was taken; the counter moved on, so the next candidate differs.
   }
   if (staging.handle == INVALID_HANDLE_VALUE) {
     return fs_error(ErrorCategory::Io, "staging_create",
-                    "cannot create a unique staging file for " + quoted(path) + " in " +
+                    "cannot create a unique staging file for " + path_quoted(path) + " in " +
                         std::to_string(kStagingAttempts) + " attempts",
                     platform_error_text(failure));
   }
@@ -846,12 +855,12 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
     if (WriteFile(staging.handle, bytes.data() + offset, static_cast<DWORD>(chunk), &written, nullptr) == 0) {
       return fs_error(ErrorCategory::Io, "write",
                       "cannot write byte " + std::to_string(offset) + " of " + std::to_string(bytes.size()) +
-                          " to the staging file for " + quoted(path),
+                          " to the staging file for " + path_quoted(path),
                       platform_error_text(static_cast<unsigned long>(GetLastError())));
     }
     if (written == 0) {
       return fs_error(ErrorCategory::Io, "write_stalled",
-                      "a write to the staging file for " + quoted(path) + " reported success but stored no bytes, with " +
+                      "a write to the staging file for " + path_quoted(path) + " reported success but stored no bytes, with " +
                           std::to_string(remaining) + " bytes still to write",
                       "the platform made no progress");
     }
@@ -859,13 +868,13 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
   }
 
   if (FlushFileBuffers(staging.handle) == 0) {
-    return fs_error(ErrorCategory::Io, "flush", "cannot flush the staging file for " + quoted(path),
+    return fs_error(ErrorCategory::Io, "flush", "cannot flush the staging file for " + path_quoted(path),
                     platform_error_text(static_cast<unsigned long>(GetLastError())));
   }
   if (CloseHandle(staging.handle) == 0) {
     const unsigned long code = static_cast<unsigned long>(GetLastError());
     staging.handle = INVALID_HANDLE_VALUE;
-    return fs_error(ErrorCategory::Io, "close", "cannot close the staging file for " + quoted(path),
+    return fs_error(ErrorCategory::Io, "close", "cannot close the staging file for " + path_quoted(path),
                     platform_error_text(code));
   }
   staging.handle = INVALID_HANDLE_VALUE;
@@ -877,7 +886,7 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
   if (MoveFileExW(staging.wide_path.c_str(), wide_destination.c_str(),
                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
     return fs_error(ErrorCategory::Io, "replace",
-                    "cannot replace " + quoted(path) + " with its staging file " + quoted(show(staging.wide_path)),
+                    "cannot replace " + path_quoted(path) + " with its staging file " + path_quoted(show(staging.wide_path)),
                     platform_error_text(static_cast<unsigned long>(GetLastError())));
   }
   staging.committed = true;
@@ -913,13 +922,13 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
     }
     failure = errno;
     if (failure != EEXIST) {
-      return fs_error(ErrorCategory::Io, "staging_create", "cannot create a staging file for " + quoted(path),
+      return fs_error(ErrorCategory::Io, "staging_create", "cannot create a staging file for " + path_quoted(path),
                       platform_error_text(failure));
     }
   }
   if (staging.descriptor < 0) {
     return fs_error(ErrorCategory::Io, "staging_create",
-                    "cannot create a unique staging file for " + quoted(path) + " in " +
+                    "cannot create a unique staging file for " + path_quoted(path) + " in " +
                         std::to_string(kStagingAttempts) + " attempts",
                     platform_error_text(failure));
   }
@@ -935,12 +944,12 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
       }
       return fs_error(ErrorCategory::Io, "write",
                       "cannot write byte " + std::to_string(offset) + " of " + std::to_string(bytes.size()) +
-                          " to the staging file for " + quoted(path),
+                          " to the staging file for " + path_quoted(path),
                       platform_error_text(errno));
     }
     if (written == 0) {
       return fs_error(ErrorCategory::Io, "write_stalled",
-                      "a write to the staging file for " + quoted(path) + " returned zero, with " +
+                      "a write to the staging file for " + path_quoted(path) + " returned zero, with " +
                           std::to_string(remaining) + " bytes still to write",
                       "the platform made no progress");
     }
@@ -948,20 +957,20 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
   }
 
   if (fsync(staging.descriptor) != 0) {
-    return fs_error(ErrorCategory::Io, "flush", "cannot flush the staging file for " + quoted(path),
+    return fs_error(ErrorCategory::Io, "flush", "cannot flush the staging file for " + path_quoted(path),
                     platform_error_text(errno));
   }
   if (::close(staging.descriptor) != 0) {
     const int code = errno;
     staging.descriptor = -1;
-    return fs_error(ErrorCategory::Io, "close", "cannot close the staging file for " + quoted(path),
+    return fs_error(ErrorCategory::Io, "close", "cannot close the staging file for " + path_quoted(path),
                     platform_error_text(code));
   }
   staging.descriptor = -1;
 
   if (rename(staging.path.c_str(), wide_destination.c_str()) != 0) {
     return fs_error(ErrorCategory::Io, "replace",
-                    "cannot replace " + quoted(path) + " with its staging file " + quoted(staging.path),
+                    "cannot replace " + path_quoted(path) + " with its staging file " + path_quoted(staging.path),
                     platform_error_text(errno));
   }
   staging.committed = true;
@@ -976,7 +985,7 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
   UniqueFd directory_fd(::open(directory_path.c_str(), O_RDONLY));
   if (!directory_fd.valid()) {
     return fs_error(ErrorCategory::Io, "sync_directory",
-                    "cannot open the directory " + quoted(directory_path) + " of " + quoted(path) +
+                    "cannot open the directory " + path_quoted(directory_path) + " of " + path_quoted(path) +
                         " to flush the rename",
                     platform_error_text(errno));
   }
@@ -984,7 +993,7 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
     const int code = errno;
     if (code != EINVAL && code != ENOTSUP) {
       return fs_error(ErrorCategory::Io, "sync_directory",
-                      "cannot flush the directory " + quoted(directory_path) + " of " + quoted(path),
+                      "cannot flush the directory " + path_quoted(directory_path) + " of " + path_quoted(path),
                       platform_error_text(code));
     }
   }
@@ -995,39 +1004,39 @@ Status write_file_durable(const std::string& path, std::string_view bytes) {
 
 Result<std::string> read_file_bounded(const std::string& path, std::size_t max_bytes) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot read " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot read " + path_quoted(path), "the path is empty");
   }
 
 #if defined(_WIN32)
 
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot read " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot read " + path_quoted(path), "the path is not valid UTF-8");
   }
   UniqueHandle file(CreateFileW(wide.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
   if (!file.valid()) {
     const unsigned long failure = static_cast<unsigned long>(GetLastError());
     if (is_missing_error(failure)) {
-      return fs_error(ErrorCategory::NotFound, "not_found", "no such file " + quoted(path),
+      return fs_error(ErrorCategory::NotFound, "not_found", "no such file " + path_quoted(path),
                       platform_error_text(failure));
     }
-    return fs_error(ErrorCategory::Io, "open", "cannot open " + quoted(path) + " for reading",
+    return fs_error(ErrorCategory::Io, "open", "cannot open " + path_quoted(path) + " for reading",
                     platform_error_text(failure));
   }
 
   LARGE_INTEGER size{};
   if (GetFileSizeEx(file.get(), &size) == 0) {
-    return fs_error(ErrorCategory::Io, "stat", "cannot size " + quoted(path),
+    return fs_error(ErrorCategory::Io, "stat", "cannot size " + path_quoted(path),
                     platform_error_text(static_cast<unsigned long>(GetLastError())));
   }
   if (size.QuadPart < 0) {
-    return fs_error(ErrorCategory::Io, "stat", "cannot size " + quoted(path), "the platform reported a negative size");
+    return fs_error(ErrorCategory::Io, "stat", "cannot size " + path_quoted(path), "the platform reported a negative size");
   }
   const unsigned long long declared = static_cast<unsigned long long>(size.QuadPart);
   if (declared > max_bytes) {
     return fs_error(ErrorCategory::BoundExceeded, "bound_exceeded",
-                    "the file " + quoted(path) + " is " + std::to_string(declared) + " bytes, above the " +
+                    "the file " + path_quoted(path) + " is " + std::to_string(declared) + " bytes, above the " +
                         std::to_string(max_bytes) + " byte bound",
                     "refused before allocating");
   }
@@ -1039,7 +1048,7 @@ Result<std::string> read_file_bounded(const std::string& path, std::size_t max_b
   for (;;) {
     DWORD read = 0;
     if (ReadFile(file.get(), buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) == 0) {
-      return fs_error(ErrorCategory::Io, "read", "cannot read " + quoted(path),
+      return fs_error(ErrorCategory::Io, "read", "cannot read " + path_quoted(path),
                       platform_error_text(static_cast<unsigned long>(GetLastError())));
     }
     if (read == 0) {
@@ -1049,7 +1058,7 @@ Result<std::string> read_file_bounded(const std::string& path, std::size_t max_b
     if (contents.size() > max_bytes) {
       // The file grew between the size check and the read; the bound still wins.
       return fs_error(ErrorCategory::BoundExceeded, "bound_exceeded",
-                      "the file " + quoted(path) + " grew past the " + std::to_string(max_bytes) +
+                      "the file " + path_quoted(path) + " grew past the " + std::to_string(max_bytes) +
                           " byte bound while it was being read",
                       "refused after " + std::to_string(contents.size()) + " bytes");
     }
@@ -1062,24 +1071,24 @@ Result<std::string> read_file_bounded(const std::string& path, std::size_t max_b
   if (!file.valid()) {
     const int failure = errno;
     if (failure == ENOENT || failure == ENOTDIR) {
-      return fs_error(ErrorCategory::NotFound, "not_found", "no such file " + quoted(path),
+      return fs_error(ErrorCategory::NotFound, "not_found", "no such file " + path_quoted(path),
                       platform_error_text(failure));
     }
-    return fs_error(ErrorCategory::Io, "open", "cannot open " + quoted(path) + " for reading",
+    return fs_error(ErrorCategory::Io, "open", "cannot open " + path_quoted(path) + " for reading",
                     platform_error_text(failure));
   }
 
   struct stat info {};
   if (fstat(file.get(), &info) != 0) {
-    return fs_error(ErrorCategory::Io, "stat", "cannot size " + quoted(path), platform_error_text(errno));
+    return fs_error(ErrorCategory::Io, "stat", "cannot size " + path_quoted(path), platform_error_text(errno));
   }
   if (S_ISDIR(info.st_mode)) {
-    return fs_error(ErrorCategory::Io, "read", "cannot read " + quoted(path), "the path is a directory");
+    return fs_error(ErrorCategory::Io, "read", "cannot read " + path_quoted(path), "the path is a directory");
   }
   const unsigned long long declared = static_cast<unsigned long long>(info.st_size);
   if (declared > max_bytes) {
     return fs_error(ErrorCategory::BoundExceeded, "bound_exceeded",
-                    "the file " + quoted(path) + " is " + std::to_string(declared) + " bytes, above the " +
+                    "the file " + path_quoted(path) + " is " + std::to_string(declared) + " bytes, above the " +
                         std::to_string(max_bytes) + " byte bound",
                     "refused before allocating");
   }
@@ -1093,7 +1102,7 @@ Result<std::string> read_file_bounded(const std::string& path, std::size_t max_b
       if (errno == EINTR) {
         continue;
       }
-      return fs_error(ErrorCategory::Io, "read", "cannot read " + quoted(path), platform_error_text(errno));
+      return fs_error(ErrorCategory::Io, "read", "cannot read " + path_quoted(path), platform_error_text(errno));
     }
     if (read == 0) {
       break;
@@ -1101,7 +1110,7 @@ Result<std::string> read_file_bounded(const std::string& path, std::size_t max_b
     contents.append(buffer.data(), static_cast<std::size_t>(read));
     if (contents.size() > max_bytes) {
       return fs_error(ErrorCategory::BoundExceeded, "bound_exceeded",
-                      "the file " + quoted(path) + " grew past the " + std::to_string(max_bytes) +
+                      "the file " + path_quoted(path) + " grew past the " + std::to_string(max_bytes) +
                           " byte bound while it was being read",
                       "refused after " + std::to_string(contents.size()) + " bytes");
     }
@@ -1151,12 +1160,12 @@ bool directory_exists(const std::string& path) {
 
 Status remove_file(const std::string& path) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + path_quoted(path), "the path is empty");
   }
 #if defined(_WIN32)
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + path_quoted(path), "the path is not valid UTF-8");
   }
   if (DeleteFileW(wide.c_str()) != 0) {
     return success();
@@ -1165,7 +1174,7 @@ Status remove_file(const std::string& path) {
   if (is_missing_error(failure)) {
     return success();
   }
-  return fs_error(ErrorCategory::Io, "remove", "cannot remove " + quoted(path), platform_error_text(failure));
+  return fs_error(ErrorCategory::Io, "remove", "cannot remove " + path_quoted(path), platform_error_text(failure));
 #else
   if (unlink(path.c_str()) == 0) {
     return success();
@@ -1174,23 +1183,23 @@ Status remove_file(const std::string& path) {
   if (failure == ENOENT || failure == ENOTDIR) {
     return success();
   }
-  return fs_error(ErrorCategory::Io, "remove", "cannot remove " + quoted(path), platform_error_text(failure));
+  return fs_error(ErrorCategory::Io, "remove", "cannot remove " + path_quoted(path), platform_error_text(failure));
 #endif
 }
 
 Status create_directories(const std::string& path) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + path_quoted(path), "the path is empty");
   }
 
 #if defined(_WIN32)
 
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + path_quoted(path), "the path is not valid UTF-8");
   }
   if (wide.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot create " + path_quoted(path), "the path is empty");
   }
 
   // The common case is that it already exists, and that case must not depend on
@@ -1200,7 +1209,7 @@ Status create_directories(const std::string& path) {
     return success();
   }
   if (existing.kind == EntryKind::File || existing.kind == EntryKind::Other) {
-    return fs_error(ErrorCategory::Conflict, "conflict", "cannot create the directory " + quoted(path),
+    return fs_error(ErrorCategory::Conflict, "conflict", "cannot create the directory " + path_quoted(path),
                     "an entry that is not a directory already exists at that name");
   }
 
@@ -1247,7 +1256,7 @@ Status create_directories(const std::string& path) {
     return success();
   }
   if (file_exists(target)) {
-    return fs_error(ErrorCategory::Conflict, "conflict", "cannot create the directory " + quoted(path),
+    return fs_error(ErrorCategory::Conflict, "conflict", "cannot create the directory " + path_quoted(path),
                     "an entry that is not a directory already exists at that name");
   }
 
@@ -1266,15 +1275,15 @@ Status create_directories(const std::string& path) {
 
 Status remove_directory_tree(const std::string& path) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + path_quoted(path), "the path is empty");
   }
 #if defined(_WIN32)
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + path_quoted(path), "the path is not valid UTF-8");
   }
   if (wide.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot remove " + path_quoted(path), "the path is empty");
   }
   return remove_tree_wide(wide);
 #else
@@ -1284,7 +1293,7 @@ Status remove_directory_tree(const std::string& path) {
 
 Result<std::vector<std::string>> list_directory(const std::string& path) {
   if (path.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + path_quoted(path), "the path is empty");
   }
 
   std::vector<std::string> names;
@@ -1293,10 +1302,10 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
 
   std::wstring wide;
   if (!to_wide(path, wide)) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + quoted(path), "the path is not valid UTF-8");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + path_quoted(path), "the path is not valid UTF-8");
   }
   if (wide.empty()) {
-    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + quoted(path), "the path is empty");
+    return fs_error(ErrorCategory::Invalid, "path", "cannot list " + path_quoted(path), "the path is empty");
   }
 
   std::wstring pattern = wide;
@@ -1310,10 +1319,10 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
   if (search == INVALID_HANDLE_VALUE) {
     const unsigned long failure = static_cast<unsigned long>(GetLastError());
     if (is_missing_error(failure) || failure == ERROR_DIRECTORY) {
-      return fs_error(ErrorCategory::NotFound, "not_found", "no such directory " + quoted(path),
+      return fs_error(ErrorCategory::NotFound, "not_found", "no such directory " + path_quoted(path),
                       platform_error_text(failure));
     }
-    return fs_error(ErrorCategory::Io, "list", "cannot list " + quoted(path), platform_error_text(failure));
+    return fs_error(ErrorCategory::Io, "list", "cannot list " + path_quoted(path), platform_error_text(failure));
   }
 
   for (;;) {
@@ -1323,7 +1332,7 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
       if (!to_utf8(entry, name)) {
         FindClose(search);
         return fs_error(ErrorCategory::Io, "name_encoding",
-                        "cannot list " + quoted(path) + " because the entry " + quoted(show(entry)) +
+                        "cannot list " + path_quoted(path) + " because the entry " + path_quoted(show(entry)) +
                             " is not valid UTF-16",
                         "reported instead of substituted");
       }
@@ -1333,7 +1342,7 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
       const unsigned long failure = static_cast<unsigned long>(GetLastError());
       FindClose(search);
       if (failure != ERROR_NO_MORE_FILES) {
-        return fs_error(ErrorCategory::Io, "list", "cannot list " + quoted(path), platform_error_text(failure));
+        return fs_error(ErrorCategory::Io, "list", "cannot list " + path_quoted(path), platform_error_text(failure));
       }
       break;
     }
@@ -1345,10 +1354,10 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
   if (directory == nullptr) {
     const int failure = errno;
     if (failure == ENOENT || failure == ENOTDIR) {
-      return fs_error(ErrorCategory::NotFound, "not_found", "no such directory " + quoted(path),
+      return fs_error(ErrorCategory::NotFound, "not_found", "no such directory " + path_quoted(path),
                       platform_error_text(failure));
     }
-    return fs_error(ErrorCategory::Io, "list", "cannot list " + quoted(path), platform_error_text(failure));
+    return fs_error(ErrorCategory::Io, "list", "cannot list " + path_quoted(path), platform_error_text(failure));
   }
   for (;;) {
     errno = 0;
@@ -1366,7 +1375,7 @@ Result<std::vector<std::string>> list_directory(const std::string& path) {
   const int read_error = errno;
   closedir(directory);
   if (read_error != 0) {
-    return fs_error(ErrorCategory::Io, "list", "cannot list " + quoted(path), platform_error_text(read_error));
+    return fs_error(ErrorCategory::Io, "list", "cannot list " + path_quoted(path), platform_error_text(read_error));
   }
 
 #endif

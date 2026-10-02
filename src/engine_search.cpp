@@ -667,9 +667,7 @@ Result<SearchResult> run_search(const PlacementRequest& request, const Placement
     const Obligation& obligation = *context.obligation;
     for (const Selection& selection : result.per_obligation[obligation_index]) {
       const std::vector<std::size_t>& candidates = context.candidates;
-      const auto it = std::find_if(candidates.begin(), candidates.end(), [&index, &selection](std::size_t position) {
-        return position == selection.site_index;
-      });
+      const auto it = std::find(candidates.begin(), candidates.end(), selection.site_index);
       if (it == candidates.end()) {
         continue;
       }
