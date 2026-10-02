@@ -493,9 +493,12 @@ no plan, and never a partial one.
 
 ## Validation performed
 
-Everything in this section was run on the machine that produced this repository: Windows
-x64, MinGW-w64 GCC 14.2.0, CMake 4.3.2, Ninja 1.13.2. Nothing here is projected from
-another platform, and no result is reported for a configuration that was not executed.
+Two kinds of evidence appear below. Results measured on the machine that produced this
+repository are marked as such: Windows x64, MinGW-w64 GCC 14.2.0, MSVC 19.44, CMake 4.3.2,
+Ninja 1.13.2. Results from the continuous integration workflow ran on GitHub-hosted
+runners, and the job that produced each one is named. Nothing is projected: every number
+and every pass below was executed somewhere, and what has not been executed is listed at
+the end rather than implied.
 
 ### The test suite
 
@@ -576,20 +579,50 @@ The consumer is a separate project that finds the package through
 with a plan digest. It is configured against the install prefix only and never against
 this build tree.
 
-### Not exercised here
+### Continuous integration
 
-* **Sanitizers.** This MinGW-w64 toolchain ships no @libasan@ or @libubsan@: linking
-  @-fsanitize=address@ fails with @cannot find -lasan@, reproduced with a two-line probe
-  program, so the sanitizer configuration was not built or run on this machine. The CI
-  workflow runs the suite under @-DCSP_SANITIZE=address+undefined@ on Ubuntu and under
-  MSVC's AddressSanitizer on Windows. Neither has been executed here and no result is
-  claimed for them.
-* **MSVC and Linux.** No MSVC toolchain and no Linux machine were used. The
-  MSVC-specific branch of the checked-arithmetic helpers was exercised by compiling it
-  under GCC with that branch forced, which checks the arithmetic but not the toolchain.
-  The POSIX branch of @fs_atomic.cpp@ is not compiled on Windows at all.
-* **The shared-library build.** @CSP_BUILD_SHARED=ON@ was configured and built, but only
-  the static configuration was exercised end to end.
+The workflow in @.github/workflows/ci.yml@ is the evidence for the configurations that
+cannot be reproduced on one machine. It runs seven jobs and every one of them passes on
+the commit this release is built from:
+
+| Job | Configuration |
+| --- | ------------- |
+| Ubuntu / GCC | Release and Debug: build, the whole suite, the synthetic benchmark, a CPack archive |
+| Ubuntu / Clang | Release and Debug |
+| Ubuntu / GCC / ASan+UBSan | @-DCSP_SANITIZE=address+undefined@ with @UBSAN_OPTIONS=halt_on_error=1@ and @ASAN_OPTIONS=detect_leaks=1@ |
+| Windows / MSVC | Release and Debug: build, the whole suite, the synthetic benchmark, a CPack archive |
+| Windows / MSVC / AddressSanitizer | @-DCSP_SANITIZE=address@ |
+| Installed package / downstream consumer | Ubuntu and Windows: build, install, configure the consumer against the prefix alone, build it, run it |
+| Shared library / installed package / downstream consumer | Ubuntu and Windows: @-DCSP_BUILD_SHARED=ON@, build, the whole suite, install, consumer built against the prefix and run against the shared library |
+
+No job sets @timeout-minutes@, and no test carries a CTest @TIMEOUT@ property, so the
+matrix has the same rule the local build has: a hang is a defect, not a case to kill.
+
+The shared-library job asserts the thing it names rather than assuming it. It checks that
+the shared object is present in the install prefix, runs the consumer with the loader told
+where to find it, and then verifies that the consumer really depends on it - @ldd@ on
+Linux, @dumpbin /dependents@ on Windows - because a consumer that silently linked a static
+copy would run just as happily and would prove nothing.
+
+The POSIX branch of @src/fs_atomic.cpp@ is executed in full by the Linux jobs. They compile
+it and then run the whole suite, which performs every store commit, reopen, lock
+acquisition and refusal, directory listing, and tree removal the tests describe.
+
+### Not exercised
+
+* **Sanitizers on this machine.** The MinGW-w64 toolchain used here ships neither
+  @libasan@ nor @libubsan@: linking @-fsanitize=address@ fails with @cannot find -lasan@,
+  reproduced with a two-line probe program. The sanitizer configurations are exercised in
+  CI by GCC on Linux and by MSVC on Windows, and by MSVC on this machine; they are not
+  exercised here by MinGW.
+* **A Linux machine at hand.** Every Linux result in this document comes from the CI jobs
+  above. Nothing about Linux was measured on the machine that wrote this repository.
+* **The POSIX branch of @fs_atomic.cpp@ on this machine.** It is not compiled on Windows at
+  all. It is compiled and exercised by the Linux CI jobs.
+* **32-bit and big-endian targets.** Neither has been built or run in this repository's
+  history.
+* **Real hardware.** No test, benchmark, or claim here describes a physical facility. The
+  benchmark numbers are synthetic by construction.
 
 ## Benchmarks
 
@@ -624,13 +657,15 @@ seconds. The deterministic columns - sites, obligations, placements, nodes explo
 
 ## Platform support and limitations
 
-Supported and exercised on this machine:
+Supported and exercised:
 
-* Windows x64, MinGW-w64 GCC 14.2.0, Release and Debug, static library.
-* The same source is written for MSVC and for Linux GCC and Clang; the CI workflow builds and
-  tests all three, and the Windows shared-library build uses CMake's automatic export-symbol
-  generation because the public surface is value types and free functions rather than annotated
-  classes.
+* Windows x64, MinGW-w64 GCC 14.2.0 and MSVC 19.44, Release and Debug, static and shared, on
+  the machine that produced this repository.
+* Linux x86-64, GCC 13 and Clang 18, Release and Debug, under AddressSanitizer and
+  UndefinedBehaviorSanitizer, static and shared, in continuous integration.
+* The Windows shared build uses CMake's automatic export-symbol generation, because the public
+  surface is value types and free functions rather than annotated classes. A downstream program
+  linked against the installed import library and ran against the installed DLL.
 
 Known limitations, stated rather than implied:
 
@@ -642,13 +677,9 @@ Known limitations, stated rather than implied:
 * **The durability boundary is the platform's flush.** @write_file_durable@ hands the bytes to
   the operating system's flush and flushes the directory entry where the platform has such a
   call. It makes no claim about any particular class of stable media, and none is made for it.
-* **The shared-library build on MSVC is not exercised on this machine.** No MSVC toolchain is
-  available here; the MSVC branch of the checked-arithmetic helpers was exercised by compiling
-  it under GCC with the preprocessor branch forced, which checks the arithmetic but not the
-  toolchain.
 * **The POSIX branch of @fs_atomic.cpp@ is not compiled on Windows.** It is written for
-  @open@, @flock@, @fsync@, and @rename@, and it is exercised by the Linux CI jobs; it has not
-  been run on this machine.
+  @open@, @flock@, @fsync@, and @rename@, and the Linux CI jobs compile it and run the whole
+  suite through it. It has never been run on the machine that produced this repository.
 * **The text decoder recurses once per nesting level**, bounded by @max_document_depth@ which
   defaults to 48. Raising that bound far above a few hundred on a build with frame pointers
   could exhaust a default thread stack. The bound is configurable precisely because it is a
@@ -666,9 +697,11 @@ Known limitations, stated rather than implied:
   there is nothing in first-party code to fix, and the suppression is GCC-only, names one
   diagnostic, and is written where it applies rather than applied across the board. Every
   other warning in the set is an error on every compiler.
-* **The Windows shared build was configured and built but not exercised.** The default is a
-  static library; @CSP_BUILD_SHARED=ON@ was built successfully and only the static
-  configuration was validated end to end.
+* **One compiler false positive shaped some test code.** GCC 13 at @-O3@ reports an
+  out-of-bounds @memmove@ inside libstdc++ when a record holding a vector of one-byte
+  enumerators is copied into the vector that holds it. The copy was correct; constructing
+  the record in place with @emplace_back@ avoids the analysis entirely while keeping every
+  warning enabled, so that is what the tests do.
 
 ## Relationship to adjacent boundaries
 

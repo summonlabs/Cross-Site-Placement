@@ -196,3 +196,70 @@ jobs:
           else
             ./consumer-build/csp-consumer
           fi
+
+  shared-library:
+    name: Shared library / installed package / downstream consumer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # The default build is a static library, so nothing else in this workflow links the
+      # shared one. This job exists so that the shared configuration is built, installed,
+      # and consumed by a real downstream program, because packaging is not installability
+      # and a shared library that builds is not a shared library that loads.
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSP_BUILD_SHARED=ON
+          -DCSP_BUILD_TESTS=ON -DCSP_BUILD_CLI=ON -DCSP_BUILD_EXAMPLES=ON
+          -DCSP_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install
+        run: cmake --install build --prefix "${{ github.workspace }}/prefix"
+
+      - name: Configure the consumer against the install tree only
+        run: >
+          cmake -S examples/consumer -B consumer-build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ github.workspace }}/prefix"
+
+      - name: Build the consumer
+        run: cmake --build consumer-build
+
+      - name: Run the consumer against the shared library
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=consumer-build/csp-consumer
+          if [ -f "$exe.exe" ]; then exe="$exe.exe"; fi
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            prefix_bin="${{ github.workspace }}/prefix/bin"
+            test -f "$prefix_bin/cross_site_placement.dll"
+            # The library is not beside the consumer, so the loader has to be told where
+            # the install put it.
+            PATH="$prefix_bin:$PATH" ./$exe
+            dumpbin //dependents "$exe" | grep -i cross_site_placement
+          else
+            prefix_lib="${{ github.workspace }}/prefix/lib"
+            ls "$prefix_lib"/libcross_site_placement.so* >/dev/null
+            LD_LIBRARY_PATH="$prefix_lib:${LD_LIBRARY_PATH:-}" ./$exe
+            # The consumer must depend on the shared object, not on a static copy that
+            # happened to be reachable from the build tree.
+            ldd "$exe" | grep -q libcross_site_placement.so
+          fi
+
