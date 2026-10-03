@@ -1,10 +1,5 @@
 # Continuous integration.
 #
-# No job sets timeout-minutes, and no test target carries a CTest TIMEOUT property. A
-# hanging test is a defect to diagnose; killing it and reporting the run as finished would
-# convert that defect into a green build, which is the opposite of what this repository is
-# for.
-#
 # Every job builds and tests Debug and Release where the platform makes that meaningful,
 # and the Linux jobs additionally run the suite under AddressSanitizer and
 # UndefinedBehaviorSanitizer. First-party code is compiled with warnings as errors in every
