@@ -78,13 +78,13 @@ cmake -S . -B build-lib -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-lib
 ```
 
-The options are @CSP_BUILD_SHARED@ (off), @CSP_BUILD_TESTS@, @CSP_BUILD_CLI@,
-@CSP_BUILD_EXAMPLES@, @CSP_BUILD_BENCHMARKS@, @CSP_INSTALL@, @CSP_WARNINGS_AS_ERRORS@ (on),
-and @CSP_SANITIZE@ (empty, @address@, @undefined@, @address+undefined@, or @thread@ where the
+The options are `CSP_BUILD_SHARED` (off), `CSP_BUILD_TESTS`, `CSP_BUILD_CLI`,
+`CSP_BUILD_EXAMPLES`, `CSP_BUILD_BENCHMARKS`, `CSP_INSTALL`, `CSP_WARNINGS_AS_ERRORS` (on),
+and `CSP_SANITIZE` (empty, `address`, `undefined`, `address+undefined`, or `thread` where the
 toolchain supports it).
 
 Nothing in this project has a timeout. The test harness has no watchdog, CTest targets carry
-no @TIMEOUT@ property, and the CI workflow sets no @timeout-minutes@. A hanging test is a
+no `TIMEOUT` property, and the CI workflow sets no `timeout-minutes`. A hanging test is a
 defect to diagnose.
 
 ## Installing and consuming
@@ -93,13 +93,13 @@ defect to diagnose.
 cmake --install build --prefix /some/prefix
 ```
 
-The install exports one namespaced target, @CrossSitePlacement::CrossSitePlacement@, a
-package configuration usable through @find_package(CrossSitePlacement REQUIRED)@, and the
+The install exports one namespaced target, `CrossSitePlacement::CrossSitePlacement`, a
+package configuration usable through `find_package(CrossSitePlacement REQUIRED)`, and the
 public headers. A consumer needs nothing else; the library uses only the C++20 standard
 library and the platform's threading support, and the package configuration propagates the
 thread dependency itself.
 
-@examples/consumer@ is an independent project that is not part of the top-level build. It is
+`examples/consumer` is an independent project that is not part of the top-level build. It is
 built only against an installed package:
 
 ```
@@ -110,7 +110,7 @@ cmake --build consumer-build
 
 ## The command-line tool
 
-@csp-cli@ is a real tool that exercises the boundary rather than a wrapper around one
+`csp-cli` is a real tool that exercises the boundary rather than a wrapper around one
 function.
 
 ```
@@ -128,7 +128,7 @@ csp-cli store      --dir D compact
 csp-cli gen        --sites N --seed S --classes N --out DIR [--now NANOS]
 ```
 
-@csp-cli gen@ writes a self-consistent request, evidence snapshot, and policy drawn from a
+`csp-cli gen` writes a self-consistent request, evidence snapshot, and policy drawn from a
 seeded generator, which is the shortest way to get a realistic input to run the other
 commands against. Every identifier it produces comes from the seed, never from a clock or an
 address, so two runs with one seed produce identical documents.
@@ -137,14 +137,14 @@ The exit codes are part of the interface:
 
 | Code | Meaning |
 | ---- | ------- |
-| 0 | the command succeeded, and for @plan@ and @explain@ the outcome is @planned@ |
+| 0 | the command succeeded, and for `plan` and `explain` the outcome is `planned` |
 | 1 | the planner refused: a proof that no arrangement satisfies the request |
 | 2 | the planner could not decide, or a revalidation verdict was undecidable |
 | 3 | an error: malformed input, contradictory evidence, a bound, an I/O failure, or cancellation |
 
-Every failure prints @csp-cli: <category>: <code>: <message>@ to standard error and never a
+Every failure prints `csp-cli: <category>: <code>: <message>` to standard error and never a
 partial plan. The tool reads the system clock for one purpose only: to supply the evaluation
-instant when @--now@ is absent. The library itself never reads a clock, because two runs of
+instant when `--now` is absent. The library itself never reads a clock, because two runs of
 one logical request have to agree byte for byte.
 
 ## The library API
@@ -177,23 +177,23 @@ if (csp::plan_is_applicable(plan)) {             // outcome == planned
 }
 ```
 
-Two failure kinds are kept apart deliberately. A @csp::Result@ carrying an error means the
-question could not be evaluated. A @csp::Result@ carrying a plan means it was evaluated, and
+Two failure kinds are kept apart deliberately. A `csp::Result` carrying an error means the
+question could not be evaluated. A `csp::Result` carrying a plan means it was evaluated, and
 the plan says whether an arrangement exists. Refusing to place something is an answer.
 
 ## Architecture
 
 | Layer | Files | Responsibility |
 | ----- | ----- | -------------- |
-| Values | @strong_types.hpp@, @measurement.hpp@, @core.hpp@, @error.hpp@ | identities, exact integers, three-valued truth, the error model |
-| Evidence | @evidence.hpp@, @limits.hpp@ | the consumed world and every bound |
-| Question | @request.hpp@, @policy.hpp@ | what to place, and how the undecidable is resolved |
-| Resolution | @domain_graph.cpp@ | transitive containment and alias-merged failure domains |
-| Engine | @engine.cpp@, @engine_candidates.cpp@, @engine_latency.cpp@, @engine_search.cpp@ | the rule order, the search, the ordering |
-| Answer | @plan.hpp@, @plan.cpp@ | the plan, its identity, and its digest |
-| Text | @text.hpp@, @text_render.cpp@, @text_parse.cpp@ | the canonical encoding and the trust boundary |
-| Durable | @persistence.hpp@, @store_format.cpp@, @persistence.cpp@ | the checked commit protocol and recovery |
-| Platform | @fs_atomic.cpp@ | the only translation unit that includes a platform header |
+| Values | `strong_types.hpp`, `measurement.hpp`, `core.hpp`, `error.hpp` | identities, exact integers, three-valued truth, the error model |
+| Evidence | `evidence.hpp`, `limits.hpp` | the consumed world and every bound |
+| Question | `request.hpp`, `policy.hpp` | what to place, and how the undecidable is resolved |
+| Resolution | `domain_graph.cpp` | transitive containment and alias-merged failure domains |
+| Engine | `engine.cpp`, `engine_candidates.cpp`, `engine_latency.cpp`, `engine_search.cpp` | the rule order, the search, the ordering |
+| Answer | `plan.hpp`, `plan.cpp` | the plan, its identity, and its digest |
+| Text | `text.hpp`, `text_render.cpp`, `text_parse.cpp` | the canonical encoding and the trust boundary |
+| Durable | `persistence.hpp`, `store_format.cpp`, `persistence.cpp` | the checked commit protocol and recovery |
+| Platform | `fs_atomic.cpp` | the only translation unit that includes a platform header |
 
 The deterministic core is separated from I/O and from the platform. The planner is a pure
 function of its arguments: it holds limits and nothing else, with no cache, no clock, no
@@ -206,16 +206,16 @@ depend on how many workers ran.
 ### Identities
 
 Every identity is an opaque string from a documented alphabet: ASCII letters and digits plus
-@-@, @_@, @.@, @:@, `, @+@, and @#@, between 1 and 128 bytes, starting and ending with an
+`-`, `_`, `.`, `:`, `,`, `+`, and `#`, between 1 and 128 bytes, starting and ending with an
 alphanumeric character. The alphabet excludes every path separator, so an identity can be
 used as a file name without escaping. Identities are never normalised, folded, or re-minted:
 two identities differing only in case are two identities.
 
 ### Measurements and three-valued logic
 
-Every quantity is a @Measurement<T>@ in one of four states: @Known@, @Unknown@,
-@Unsupported@, or @Unavailable@. A default-constructed measurement is @Unknown@, never zero.
-A constraint evaluates to @Satisfied@, @Violated@, or @Indeterminate@, and the third is not a
+Every quantity is a `Measurement<T>` in one of four states: `Known`, `Unknown`,
+`Unsupported`, or `Unavailable`. A default-constructed measurement is `Unknown`, never zero.
+A constraint evaluates to `Satisfied`, `Violated`, or `Indeterminate`, and the third is not a
 synonym for either of the others. Read as satisfied it would fabricate a placement; read as
 violated it would hide one.
 
@@ -226,7 +226,7 @@ number reports overflow instead of wrapping.
 ### Evidence
 
 An evidence snapshot is one reading of the world at one generation, and every record in it
-carries a @Provenance@: the identity of the upstream record, the authority that produced it,
+carries a `Provenance`: the identity of the upstream record, the authority that produced it,
 the generation of the upstream document, the instant the authority observed the fact, an
 optional expiry, and the digest of the upstream document when the caller has it.
 
@@ -236,16 +236,16 @@ merged, and a record with no observation time cannot be shown to describe the pr
 
 Evidence collections are:
 
-* @sites@: identity, jurisdiction, and maintenance state.
-* @failure_domains@: each domain, its kind, and which domain contains it.
-* @domain_assignments@: which site is inside which domain.
-* @domain_aliases@: which two domain identities are one physical domain.
-* @capacity@: an offer or commitment reference, its site, service class, and reported amount.
-* @latency@: a directed measurement between two sites, with the statistic it is expressed over.
-* @recovery@: whether a site can host a recovery placement of a class, and the RTO and RPO it
+* `sites`: identity, jurisdiction, and maintenance state.
+* `failure_domains`: each domain, its kind, and which domain contains it.
+* `domain_assignments`: which site is inside which domain.
+* `domain_aliases`: which two domain identities are one physical domain.
+* `capacity`: an offer or commitment reference, its site, service class, and reported amount.
+* `latency`: a directed measurement between two sites, with the statistic it is expressed over.
+* `recovery`: whether a site can host a recovery placement of a class, and the RTO and RPO it
   can meet.
-* @compatibility@: whether a service class may run at a site.
-* @cost_risk@: reported cost per unit and risk in parts per thousand.
+* `compatibility`: whether a service class may run at a site.
+* `cost_risk`: reported cost per unit and risk in parts per thousand.
 
 Two records with one identity that disagree are a conflict, never a merge: choosing one of two
 readings of one identity is exactly the case where keeping either would be inventing a fact.
@@ -263,7 +263,7 @@ A latency requirement names a peer: either another obligation in the same reques
 that already runs at a named site. It names a direction, the statistic the bound is expressed
 over, the bound itself, and which of this obligation's placements it applies to.
 
-A separation requirement names a group (@All@, @WithinRole@, or @AcrossRoles@), a set of domain
+A separation requirement names a group (`All`, `WithinRole`, or `AcrossRoles`), a set of domain
 kinds that no pair in that group may share, and optionally specific domains that no pair may
 share. A separation requirement that names neither a kind nor a domain is refused: it would
 constrain nothing while appearing to.
@@ -271,7 +271,7 @@ constrain nothing while appearing to.
 ### The policy
 
 Policy is authored elsewhere. The request names a policy by identity and generation, and the
-caller supplies the document; if the two disagree, planning refuses with @conflict@ and names
+caller supplies the document; if the two disagree, planning refuses with `conflict` and names
 both sides. That check exists because the failure it prevents is silent: a plan that looks like
 it followed the policy the request named, but did not.
 
@@ -288,12 +288,12 @@ refusal, and a freshness envelope.
 
 The outcome is one of three:
 
-* @planned@: every obligation in the request was placed.
-* @refused@: a proof that no arrangement satisfies the request as stated.
-* @indeterminate@: not a proof of anything. The planner could not decide with the evidence and
+* `planned`: every obligation in the request was placed.
+* `refused`: a proof that no arrangement satisfies the request as stated.
+* `indeterminate`: not a proof of anything. The planner could not decide with the evidence and
   the budget it was given.
 
-Keeping @indeterminate@ separate from @refused@ matters: a caller that reads the two alike will
+Keeping `indeterminate` separate from `refused` matters: a caller that reads the two alike will
 either retry forever or abandon a placement that exists.
 
 Each placement names its site, its role and index, the capacity required, the exact capacity
@@ -312,27 +312,27 @@ reports the first one in this order, and the test suite pins it.
 
 | # | Rule token | Question |
 | - | ---------- | -------- |
-| 1 | @csp.rule.request-bounds@ | is the request within every configured bound and structurally valid? |
-| 2 | @csp.rule.snapshot-bounds@ | is the evidence snapshot within every bound and structurally valid? |
-| 3 | @csp.rule.policy-reference@ | is the supplied policy the identity and generation the request named? |
-| 4 | @csp.rule.domain-structure@ | does containment resolve without a cycle, a depth overflow, or a contradiction? |
-| 5 | @csp.rule.site-allow-list@ | is the site on the allow list that applies to this obligation, when it states one? |
-| 6 | @csp.rule.site-deny-list@ | is the site on a deny list? |
-| 7 | @csp.rule.evidence-freshness@ | does the record carry a usable observation time inside the window? |
-| 8 | @csp.rule.jurisdiction@ | is the site's jurisdiction one this obligation allows? |
-| 9 | @csp.rule.maintenance-state@ | can the site take a new placement? |
-| 10 | @csp.rule.service-compatibility@ | may this service class run here? |
-| 11 | @csp.rule.capacity-evidence@ | does the reported capacity reach the requirement? |
-| 12 | @csp.rule.recovery-capability@ | for a recovery placement, can the site host one? |
-| 13 | @csp.rule.recovery-objective@ | for a recovery placement, does it meet the RTO and RPO? |
-| 14 | @csp.rule.colocation@ | may a site the obligation already uses take another placement? |
-| 15 | @csp.rule.failure-domain-separation@ | are the required pairs separated over the resolved ancestry? |
-| 16 | @csp.rule.latency-bound@ | does every latency requirement hold for this pair? |
-| 17 | @csp.rule.selection@ | did the search complete an arrangement for this obligation? |
-| 18 | @csp.rule.preference-order@ | which admissible candidate does the preference list put first? |
-| 19 | @csp.rule.search-budget@ | did the search exhaust its work budget instead of finishing? |
+| 1 | `csp.rule.request-bounds` | is the request within every configured bound and structurally valid? |
+| 2 | `csp.rule.snapshot-bounds` | is the evidence snapshot within every bound and structurally valid? |
+| 3 | `csp.rule.policy-reference` | is the supplied policy the identity and generation the request named? |
+| 4 | `csp.rule.domain-structure` | does containment resolve without a cycle, a depth overflow, or a contradiction? |
+| 5 | `csp.rule.site-allow-list` | is the site on the allow list that applies to this obligation, when it states one? |
+| 6 | `csp.rule.site-deny-list` | is the site on a deny list? |
+| 7 | `csp.rule.evidence-freshness` | does the record carry a usable observation time inside the window? |
+| 8 | `csp.rule.jurisdiction` | is the site's jurisdiction one this obligation allows? |
+| 9 | `csp.rule.maintenance-state` | can the site take a new placement? |
+| 10 | `csp.rule.service-compatibility` | may this service class run here? |
+| 11 | `csp.rule.capacity-evidence` | does the reported capacity reach the requirement? |
+| 12 | `csp.rule.recovery-capability` | for a recovery placement, can the site host one? |
+| 13 | `csp.rule.recovery-objective` | for a recovery placement, does it meet the RTO and RPO? |
+| 14 | `csp.rule.colocation` | may a site the obligation already uses take another placement? |
+| 15 | `csp.rule.failure-domain-separation` | are the required pairs separated over the resolved ancestry? |
+| 16 | `csp.rule.latency-bound` | does every latency requirement hold for this pair? |
+| 17 | `csp.rule.selection` | did the search complete an arrangement for this obligation? |
+| 18 | `csp.rule.preference-order` | which admissible candidate does the preference list put first? |
+| 19 | `csp.rule.search-budget` | did the search exhaust its work budget instead of finishing? |
 
-@csp-cli rules@ prints this list from the library, so a reader of a trace can tell an absent
+`csp-cli rules` prints this list from the library, so a reader of a trace can tell an absent
 rule from a rule that passed.
 
 ### Candidate ordering and tie-breaks
@@ -342,13 +342,13 @@ first objective decides and each later one breaks only the ties the earlier ones
 final tie-break is always the site identity in byte order, so a total order always exists even
 when no preference can be evaluated at all.
 
-@MinimiseCost@ and @MinimiseRisk@ order sites by the reported value, with sites whose value
+`MinimiseCost` and `MinimiseRisk` order sites by the reported value, with sites whose value
 nobody reported last. They are never treated as free or as safe, and the plan records the
-criterion as @indeterminate@ when not every candidate had a reported value, so a reader can see
-how much of the ordering the criterion actually decided. @MaximiseDomainSpread@ orders sites by
+criterion as `indeterminate` when not every candidate had a reported value, so a reader can see
+how much of the ordering the criterion actually decided. `MaximiseDomainSpread` orders sites by
 how many resolved failure domains they belong to, most first; it is a per-site ordering and the
 plan says so rather than claiming to have maximised anything about the chosen set.
-@MinimiseSites@ is applied by the search, which tries a site already chosen for the obligation
+`MinimiseSites` is applied by the search, which tries a site already chosen for the obligation
 before a new one when the obligation permits co-location.
 
 The search is a depth-first walk over the candidate order with backtracking, written iteratively
@@ -424,8 +424,8 @@ generations, the instant the plan stops being usable, and the conditions under w
 recomputed rather than used. That list is always non-empty: a plan that never needs revalidation
 would be a plan that claims the world does not move.
 
-@plan_revalidate@ asks a narrow question: does this plan still hold against this newer snapshot
-and policy? It answers @holds@, @broken@, or @undecidable@, and the third is not a synonym for
+`plan_revalidate` asks a narrow question: does this plan still hold against this newer snapshot
+and policy? It answers `holds`, `broken`, or `undecidable`, and the third is not a synonym for
 either of the others. It checks that each placed site still exists, is still in a maintenance
 state the policy admits, still evidences the capacity the placement was made against, and is
 still compatible; that every separation requirement still holds over the new ancestry; and that
@@ -469,26 +469,26 @@ Recovery, performed under the store lock when the store is opened:
 4. Records that no manifest references are reported and kept. They may be the durable half of a
    commit that is still in flight.
 
-@compact@ removes records that no committed manifest references and that are strictly older than
+`compact` removes records that no committed manifest references and that are strictly older than
 the committed generation. A record newer than the committed generation is never removed, so
 compaction cannot supersede uncommitted new state.
 
 A commit carries the generation it expected. A mismatch is a refusal naming both generations
-with @stale@, and nothing is written.
+with `stale`, and nothing is written.
 
 ## Concurrency and lock order
 
-The lock order is @PlanStore@'s own mutex first, then the store's lock file. Nothing takes them
+The lock order is `PlanStore`'s own mutex first, then the store's lock file. Nothing takes them
 in the other order. No caller code runs while either is held, there are no callbacks in the
 library, and no lock is ever taken twice.
 
-The engine holds no locks at all. Its only concurrency is @parallel_for@, used for exactly one
+The engine holds no locks at all. Its only concurrency is `parallel_for`, used for exactly one
 thing: evaluating a per-candidate predicate over a candidate list with a bounded number of
 workers. The predicate is a pure function of the candidate and the snapshot, writes only its own
 slot, and calls nothing that acquires a lock. Results are assembled in index order after every
 worker has been joined, so the answer does not depend on how many workers ran or which finished
 first. Workers are always joined, including on the cancellation path; none is ever abandoned.
-Cancellation is cooperative and observed between items; a cancelled call returns @cancelled@ and
+Cancellation is cooperative and observed between items; a cancelled call returns `cancelled` and
 no plan, and never a partial one.
 
 ## Validation performed
@@ -511,7 +511,7 @@ cmake --build build/all
 
 Release: **129 cases, 17 471 checks, 0 failures**. Debug: the same 129 cases and the same
 17 471 checks, 0 failures. The suite was run three times in Release with an identical
-result each time. @ctest --test-dir build/all@ reports 5 of 5 passing in 13.3 seconds: four
+result each time. `ctest --test-dir build/all` reports 5 of 5 passing in 13.3 seconds: four
 examples and the suite.
 
 The suite is deliberately not built out of one flavour of case:
@@ -519,17 +519,17 @@ The suite is deliberately not built out of one flavour of case:
 | Area | What it establishes |
 | ---- | ------------------- |
 | values | the identity alphabet, exact-integer overflow, the four measurement states, Kleene logic and De Morgan over all nine pairs, one error token per category |
-| documents | a full snapshot round trip, 21 decoder refusals each by category and code, every collection bound tested at the bound and one past it, a plan altered by one byte refused as @integrity@ |
+| documents | a full snapshot round trip, 21 decoder refusals each by category and code, every collection bound tested at the bound and one past it, a plan altered by one byte refused as `integrity` |
 | placement | determinism, seeded ingestion-order independence over all nine evidence collections, and one case each for capacity, maintenance, compatibility, jurisdiction, preferences, policy identity, freshness, and the validation refusal set |
 | separation | kind rules against named rules, transitive containment, aliases caught only once declared, a site with no membership never reported as separated, violation outranking doubt, and the structural refusals |
 | latency | direct bounds, unknown stays unknown, statistic coverage in both directions, direction, derived maximum chains recorded in full, percentiles never composed, cycles that neither hang nor change the answer |
 | adversarial | duplicate identities in all seven identity-keyed collections, capacity at the integer limits, every lowerable bound exercised, 14 truncation offsets, payload flips, declared-length changes, a corrupt manifest, a deleted record, a path-traversal identity, and cancellation |
 | property | an independent model that decides the same question from the raw evidence, compared with the planner over 400 seeded fleets in both directions |
-| concurrency | byte-identical plans for @worker_threads@ 0, 1, 2, 4 and 8, including the pass that actually splits candidate evaluation across workers; 64 calls from 8 threads; 4 readers times 300 rounds against a writer; concurrent commits |
+| concurrency | byte-identical plans for `worker_threads` 0, 1, 2, 4 and 8, including the pass that actually splits candidate evaluation across workers; 64 calls from 8 threads; 4 readers times 300 rounds against a writer; concurrent commits |
 | persistence | commit, real close, real reopen and load; idempotent recommit against identity reuse; audit; compaction that never removes a record newer than the committed generation |
 | revalidation | holds, each broken condition named, undecidable where the evidence is merely absent, expiry, and the structural refusals |
 | multiprocess | real second and third OS processes: concurrent commits that stay consistent, a lock refused within its bound, and a store reconstructed between the record write and the manifest write |
-| cli | the real @csp-cli@ driven as a child process: exit codes 0, 1, 2 and 3, the digest recomputed independently and compared, and the store round trip through the tool |
+| cli | the real `csp-cli` driven as a child process: exit codes 0, 1, 2 and 3, the digest recomputed independently and compared, and the store round trip through the tool |
 
 Two claims the suite makes explicitly rather than by omission: a cancelled call never
 produces a plan, and the uncancelled call with the same inputs does; and an arrangement
@@ -548,12 +548,12 @@ that the independent model finds admissible is never refused.
 * A record file name containing a path traversal is refused by identity parsing with
   nothing created on disk.
 * A capacity at the integer limit with two placements does not wrap; a sum that cannot be
-  represented is refused as @out_of_range@ rather than saturating.
+  represented is refused as `out_of_range` rather than saturating.
 
 ### Concurrency and multiprocess
 
 The parallel candidate-evaluation pass is taken when an obligation has a per-site
-preference to order by, the candidate count reaches @parallel_threshold@, more than one
+preference to order by, the candidate count reaches `parallel_threshold`, more than one
 worker is allowed, and the whole pass is known to fit the remaining work budget. The
 concurrency suite exercises the pass that meets all four conditions and asserts that the
 plan, its identity, and even the number of work units consumed are identical to the
@@ -574,14 +574,14 @@ cmake --build consumer-build
 ```
 
 The consumer is a separate project that finds the package through
-@find_package(CrossSitePlacement REQUIRED)@, links
-@CrossSitePlacement::CrossSitePlacement@, places one obligation, and prints @consumer ok@
+`find_package(CrossSitePlacement REQUIRED)`, links
+`CrossSitePlacement::CrossSitePlacement`, places one obligation, and prints `consumer ok`
 with a plan digest. It is configured against the install prefix only and never against
 this build tree.
 
 ### Continuous integration
 
-The workflow in @.github/workflows/ci.yml@ is the evidence for the configurations that
+The workflow in `.github/workflows/ci.yml` is the evidence for the configurations that
 cannot be reproduced on one machine. It runs seven jobs and every one of them passes on
 the commit this release is built from:
 
@@ -589,35 +589,35 @@ the commit this release is built from:
 | --- | ------------- |
 | Ubuntu / GCC | Release and Debug: build, the whole suite, the synthetic benchmark, a CPack archive |
 | Ubuntu / Clang | Release and Debug |
-| Ubuntu / GCC / ASan+UBSan | @-DCSP_SANITIZE=address+undefined@ with @UBSAN_OPTIONS=halt_on_error=1@ and @ASAN_OPTIONS=detect_leaks=1@ |
+| Ubuntu / GCC / ASan+UBSan | `-DCSP_SANITIZE=address+undefined` with `UBSAN_OPTIONS=halt_on_error=1` and `ASAN_OPTIONS=detect_leaks=1` |
 | Windows / MSVC | Release and Debug: build, the whole suite, the synthetic benchmark, a CPack archive |
-| Windows / MSVC / AddressSanitizer | @-DCSP_SANITIZE=address@ |
+| Windows / MSVC / AddressSanitizer | `-DCSP_SANITIZE=address` |
 | Installed package / downstream consumer | Ubuntu and Windows: build, install, configure the consumer against the prefix alone, build it, run it |
-| Shared library / installed package / downstream consumer | Ubuntu and Windows: @-DCSP_BUILD_SHARED=ON@, build, the whole suite, install, consumer built against the prefix and run against the shared library |
+| Shared library / installed package / downstream consumer | Ubuntu and Windows: `-DCSP_BUILD_SHARED=ON`, build, the whole suite, install, consumer built against the prefix and run against the shared library |
 
-No job sets @timeout-minutes@, and no test carries a CTest @TIMEOUT@ property, so the
+No job sets `timeout-minutes`, and no test carries a CTest `TIMEOUT` property, so the
 matrix has the same rule the local build has: a hang is a defect, not a case to kill.
 
 The shared-library job asserts the thing it names rather than assuming it. It checks that
 the shared object is present in the install prefix, runs the consumer with the loader told
-where to find it, and then verifies that the consumer really depends on it - @ldd@ on
-Linux, @dumpbin /dependents@ on Windows - because a consumer that silently linked a static
+where to find it, and then verifies that the consumer really depends on it - `ldd` on
+Linux, `dumpbin /dependents` on Windows - because a consumer that silently linked a static
 copy would run just as happily and would prove nothing.
 
-The POSIX branch of @src/fs_atomic.cpp@ is executed in full by the Linux jobs. They compile
+The POSIX branch of `src/fs_atomic.cpp` is executed in full by the Linux jobs. They compile
 it and then run the whole suite, which performs every store commit, reopen, lock
 acquisition and refusal, directory listing, and tree removal the tests describe.
 
 ### Not exercised
 
 * **Sanitizers on this machine.** The MinGW-w64 toolchain used here ships neither
-  @libasan@ nor @libubsan@: linking @-fsanitize=address@ fails with @cannot find -lasan@,
+  `libasan` nor `libubsan`: linking `-fsanitize=address` fails with `cannot find -lasan`,
   reproduced with a two-line probe program. The sanitizer configurations are exercised in
   CI by GCC on Linux and by MSVC on Windows, and by MSVC on this machine; they are not
   exercised here by MinGW.
 * **A Linux machine at hand.** Every Linux result in this document comes from the CI jobs
   above. Nothing about Linux was measured on the machine that wrote this repository.
-* **The POSIX branch of @fs_atomic.cpp@ on this machine.** It is not compiled on Windows at
+* **The POSIX branch of `fs_atomic.cpp` on this machine.** It is not compiled on Windows at
   all. It is compiled and exercised by the Linux CI jobs.
 * **32-bit and big-endian targets.** Neither has been built or run in this repository's
   history.
@@ -626,7 +626,7 @@ acquisition and refusal, directory listing, and tree removal the tests describe.
 
 ## Benchmarks
 
-@csp-benchmark@ measures completed operations, never submission or enqueue latency. Every
+`csp-benchmark` measures completed operations, never submission or enqueue latency. Every
 number below is **SYNTHETIC**: generated from a fixed seed on this machine, and describing
 no real deployment. No before-and-after comparison is published, because no second
 implementation was measured.
@@ -635,7 +635,7 @@ implementation was measured.
 ./build/benchmarks/csp-benchmark --scale=full
 ```
 
-One completed @Planner::plan@ call, end to end, on a synthetic fleet of the stated size:
+One completed `Planner::plan` call, end to end, on a synthetic fleet of the stated size:
 
 | sites | obligations | placements | reps | median ns | min ns | nodes explored |
 | ----: | ----------: | ---------: | ---: | --------: | -----: | -------------: |
@@ -651,7 +651,7 @@ Durable operations, measured separately and not part of the planning numbers abo
 | encode and digest | a plan drafted from a 50 000 site fleet | 11 | 73 900 | 65 000 | 6 779 |
 | store commit | distinct plans over a 256 site fleet | 16 | 8 578 900 | 4 020 900 | 110 711 |
 
-The @--scale=small@ ladder (1 000, 5 000, 20 000 sites) is the default and finishes in
+The `--scale=small` ladder (1 000, 5 000, 20 000 sites) is the default and finishes in
 seconds. The deterministic columns - sites, obligations, placements, nodes explored, bytes
 - are identical across repeated runs; the timings are not, and are reported as measured.
 
@@ -669,18 +669,18 @@ Supported and exercised:
 
 Known limitations, stated rather than implied:
 
-* **The file lock is advisory.** A process that does not go through @FileLock@ can still write
+* **The file lock is advisory.** A process that does not go through `FileLock` can still write
   to a store directory. Every operation in this library goes through it, which is what makes the
   protocol hold between cooperating processes; it is not a defence against a hostile one.
 * **A store directory cannot be deleted while a store is open on Windows**, because the lock
   file is opened without delete sharing. Close the store first.
-* **The durability boundary is the platform's flush.** @write_file_durable@ hands the bytes to
+* **The durability boundary is the platform's flush.** `write_file_durable` hands the bytes to
   the operating system's flush and flushes the directory entry where the platform has such a
   call. It makes no claim about any particular class of stable media, and none is made for it.
-* **The POSIX branch of @fs_atomic.cpp@ is not compiled on Windows.** It is written for
-  @open@, @flock@, @fsync@, and @rename@, and the Linux CI jobs compile it and run the whole
+* **The POSIX branch of `fs_atomic.cpp` is not compiled on Windows.** It is written for
+  `open`, `flock`, `fsync`, and `rename`, and the Linux CI jobs compile it and run the whole
   suite through it. It has never been run on the machine that produced this repository.
-* **The text decoder recurses once per nesting level**, bounded by @max_document_depth@ which
+* **The text decoder recurses once per nesting level**, bounded by `max_document_depth` which
   defaults to 48. Raising that bound far above a few hundred on a build with frame pointers
   could exhaust a default thread stack. The bound is configurable precisely because it is a
   bound, and lowering it is always safe.
@@ -688,19 +688,19 @@ Known limitations, stated rather than implied:
   tell that two references report the same physical capacity in different ways. It records
   exactly which references it counted, so an over-count introduced upstream is visible in the
   plan rather than hidden by it.
-* **Planning is bounded work.** A search that exhausts its budget reports @indeterminate@ with
-  @search_exhausted@ set, which is not a proof that no arrangement exists.
+* **Planning is bounded work.** A search that exhausts its budget reports `indeterminate` with
+  `search_exhausted` set, which is not a proof that no arrangement exists.
 * **One compiler diagnostic is suppressed, for one compiler.** GCC's
-  @-Wnull-dereference@ rests on @-fdelete-null-pointer-checks@ and is documented to be
-  prone to false positives; at @-O3@ it fires inside libstdc++'s own @<streambuf>@ when a
+  `-Wnull-dereference` rests on `-fdelete-null-pointer-checks` and is documented to be
+  prone to false positives; at `-O3` it fires inside libstdc++'s own `<streambuf>` when a
   first-party translation unit uses a stream. The diagnostic is about a system header, so
   there is nothing in first-party code to fix, and the suppression is GCC-only, names one
   diagnostic, and is written where it applies rather than applied across the board. Every
   other warning in the set is an error on every compiler.
-* **One compiler false positive shaped some test code.** GCC 13 at @-O3@ reports an
-  out-of-bounds @memmove@ inside libstdc++ when a record holding a vector of one-byte
+* **One compiler false positive shaped some test code.** GCC 13 at `-O3` reports an
+  out-of-bounds `memmove` inside libstdc++ when a record holding a vector of one-byte
   enumerators is copied into the vector that holds it. The copy was correct; constructing
-  the record in place with @emplace_back@ avoids the analysis entirely while keeping every
+  the record in place with `emplace_back` avoids the analysis entirely while keeping every
   warning enabled, so that is what the tests do.
 
 ## Relationship to adjacent boundaries
