@@ -1,7 +1,7 @@
 # Cross-Site Placement
 
 Cross-Site Placement is the deterministic cross-site placement planning and explanation
-authority of the Data Center Control Plane. It answers one question: **given candidate
+authority. It answers one question: **given candidate
 sites and explicit authoritative evidence, where should an obligation be placed so that
 physical, policy, latency and dependency, failure-independence, and recoverability
 constraints are satisfied?**
