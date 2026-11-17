@@ -444,3 +444,237 @@ CSP_TEST(persistence, store_directory_holds_only_manifest_lock_and_records) {
     CSP_EXPECT_MSG(name.size() > 5 && name.compare(name.size() - 5, 5, ".plan") == 0, name);
   }
 }
+
+CSP_TEST(persistence, record_bound_is_on_the_record_as_stored) {
+  ScratchDirectory scratch("record-bound");
+  const PlacementPlan plan = plan_one("request-1", "obligation-1", 1);
+  CSP_REQUIRE(plan.outcome == PlanOutcome::Planned);
+  Result<std::string> document = plan_to_document(plan, false);
+  CSP_REQUIRE(document.has_value());
+  Result<std::string> record = detail::encode_record(plan.plan, Generation::from_value(1), document.value());
+  CSP_REQUIRE(record.has_value());
+  CSP_REQUIRE(record.value().size() > document.value().size());
+
+  // Every open and every commit reads each record file under max_store_record_bytes. A
+  // bound one byte short of the stored record still admits the plan document on its own,
+  // so a commit that only measured the document would write a record the store could
+  // never read again.
+  StoreOptions options = options_for(scratch.path());
+  options.limits.max_store_record_bytes = record.value().size() - 1;
+  {
+    Result<PlanStore> opened = PlanStore::open(options);
+    CSP_REQUIRE(opened.has_value());
+    PlanStore store = std::move(opened).value();
+    Result<PlanId> committed = store.commit(plan);
+    CSP_EXPECT(!committed.has_value());
+    if (!committed.has_value()) {
+      CSP_EXPECT(committed.error().category() == ErrorCategory::BoundExceeded);
+      CSP_EXPECT_EQ(committed.error().code(), std::string("csp.store.record_too_large"));
+    }
+    CSP_EXPECT_OK(store.close());
+  }
+  {
+    Result<PlanStore> reopened = PlanStore::open(options);
+    CSP_REQUIRE(reopened.has_value());
+    PlanStore store = std::move(reopened).value();
+    CSP_EXPECT(!store.generation().is_set());
+    CSP_EXPECT_OK(store.close());
+  }
+
+  // A bound that holds the stored record admits the commit, and the store reopens.
+  options.limits.max_store_record_bytes = record.value().size();
+  {
+    Result<PlanStore> opened = PlanStore::open(options);
+    CSP_REQUIRE(opened.has_value());
+    PlanStore store = std::move(opened).value();
+    CSP_REQUIRE(store.commit(plan).has_value());
+    CSP_EXPECT_OK(store.close());
+  }
+  Result<PlanStore> reopened = PlanStore::open(options);
+  CSP_REQUIRE(reopened.has_value());
+  PlanStore store = std::move(reopened).value();
+  CSP_EXPECT(store.load(plan.plan).has_value());
+  CSP_EXPECT_OK(store.close());
+}
+
+CSP_TEST(persistence, manifest_never_outgrows_the_bound_it_is_read_under) {
+  ScratchDirectory scratch("manifest-bound");
+  std::vector<PlacementPlan> plans;
+  std::size_t largest_document = 0;
+  for (int index = 0; index < 64; ++index) {
+    const std::string request = "request-" + std::to_string(index);
+    PlacementPlan plan = plan_one(request.c_str(), "obligation-1", 1);
+    CSP_REQUIRE(plan.outcome == PlanOutcome::Planned);
+    Result<std::string> document = plan_to_document(plan, false);
+    CSP_REQUIRE(document.has_value());
+    largest_document = document.value().size() > largest_document ? document.value().size() : largest_document;
+    plans.push_back(std::move(plan));
+  }
+
+  // The manifest is read under max_document_bytes. With a bound that holds any one plan
+  // document, the manifest outgrows it after a handful of records.
+  StoreOptions options = options_for(scratch.path());
+  options.limits.max_document_bytes = largest_document;
+  std::size_t committed = 0;
+  bool refused = false;
+  {
+    Result<PlanStore> opened = PlanStore::open(options);
+    CSP_REQUIRE(opened.has_value());
+    PlanStore store = std::move(opened).value();
+    for (const PlacementPlan& plan : plans) {
+      Result<PlanId> result = store.commit(plan);
+      if (!result.has_value()) {
+        CSP_EXPECT(result.error().category() == ErrorCategory::BoundExceeded);
+        CSP_EXPECT_EQ(result.error().code(), std::string("csp.store.manifest_too_large"));
+        refused = true;
+        break;
+      }
+      ++committed;
+    }
+    CSP_EXPECT(refused);
+    CSP_EXPECT(committed > 0);
+    CSP_EXPECT_OK(store.close());
+  }
+
+  // Whatever was committed is still there under the same limits.
+  Result<PlanStore> reopened = PlanStore::open(options);
+  CSP_REQUIRE(reopened.has_value());
+  PlanStore store = std::move(reopened).value();
+  Result<std::vector<PlanId>> listed = store.list();
+  CSP_REQUIRE(listed.has_value());
+  CSP_EXPECT_EQ(listed.value().size(), committed);
+  CSP_EXPECT_EQ(store.generation().value(), static_cast<std::uint64_t>(committed));
+  CSP_EXPECT_OK(store.close());
+}
+
+CSP_TEST(persistence, repeated_commit_is_idempotent_in_a_full_store) {
+  ScratchDirectory scratch("full-idempotent");
+  const PlacementPlan plan = plan_one("request-1", "obligation-1", 1);
+  CSP_REQUIRE(plan.outcome == PlanOutcome::Planned);
+  StoreOptions options = options_for(scratch.path());
+  options.limits.max_store_records = 1;
+  Result<PlanStore> opened = PlanStore::open(options);
+  CSP_REQUIRE(opened.has_value());
+  PlanStore store = std::move(opened).value();
+  CSP_REQUIRE(store.commit(plan).has_value());
+
+  // The store is now full. Committing the plan it already holds publishes nothing new,
+  // so it is answered as the repeat it is, not refused for the bound.
+  Result<PlanId> again = store.commit(plan);
+  CSP_REQUIRE(again.has_value());
+  CSP_EXPECT_EQ(again.value().value(), plan.plan.value());
+  CSP_EXPECT_EQ(store.generation().value(), std::uint64_t{1});
+  CSP_EXPECT_OK(store.close());
+}
+
+CSP_TEST(persistence, a_handle_sees_what_another_handle_published) {
+  ScratchDirectory scratch("two-handles");
+  const PlacementPlan first = plan_one("request-1", "obligation-1", 1);
+  const PlacementPlan second = plan_one("request-2", "obligation-2", 2);
+  const PlacementPlan third = plan_one("request-3", "obligation-3", 3);
+  CSP_REQUIRE(first.outcome == PlanOutcome::Planned);
+  CSP_REQUIRE(second.outcome == PlanOutcome::Planned);
+  CSP_REQUIRE(third.outcome == PlanOutcome::Planned);
+
+  Result<PlanStore> opened_a = PlanStore::open(options_for(scratch.path()));
+  CSP_REQUIRE(opened_a.has_value());
+  PlanStore handle_a = std::move(opened_a).value();
+  Result<PlanStore> opened_b = PlanStore::open(options_for(scratch.path()));
+  CSP_REQUIRE(opened_b.has_value());
+  PlanStore handle_b = std::move(opened_b).value();
+
+  CSP_REQUIRE(handle_a.commit(first).has_value());
+  CSP_REQUIRE(handle_b.commit(second).has_value());
+  CSP_EXPECT_EQ(handle_b.generation().value(), std::uint64_t{2});
+
+  // The first handle still believes the store is at generation 1, so a commit that is
+  // conditional on that is refused as stale. The refusal read the manifest, and the
+  // handle reports the generation it found there, so the caller can try again.
+  Result<PlanId> stale = handle_a.commit_if_generation(third, handle_a.generation());
+  CSP_EXPECT(!stale.has_value());
+  if (!stale.has_value()) {
+    CSP_EXPECT(stale.error().category() == ErrorCategory::Stale);
+  }
+  CSP_EXPECT_EQ(handle_a.generation().value(), std::uint64_t{2});
+  Result<PlanId> retried = handle_a.commit_if_generation(third, handle_a.generation());
+  CSP_REQUIRE(retried.has_value());
+  CSP_EXPECT_EQ(handle_a.generation().value(), std::uint64_t{3});
+
+  // The second handle has not read the manifest since its own commit. The third plan is
+  // published, so the handle loads it rather than reporting that the store has no such
+  // plan.
+  Result<PlacementPlan> loaded = handle_b.load(third.plan);
+  CSP_REQUIRE(loaded.has_value());
+  CSP_EXPECT_EQ(canonical(loaded.value()), canonical(third));
+  CSP_EXPECT_EQ(handle_b.generation().value(), std::uint64_t{3});
+
+  // A plan nobody published is still unknown.
+  Result<PlacementPlan> unknown = handle_b.load(plan_id("plan-0000000000000000000000000000beef"));
+  CSP_EXPECT(!unknown.has_value());
+  if (!unknown.has_value()) {
+    CSP_EXPECT(unknown.error().category() == ErrorCategory::NotFound);
+  }
+  CSP_EXPECT_OK(handle_a.close());
+  CSP_EXPECT_OK(handle_b.close());
+}
+
+CSP_TEST(persistence, a_plan_that_does_not_match_its_digest_is_not_published) {
+  ScratchDirectory scratch("digest");
+  const PlacementPlan plan = plan_one("request-1", "obligation-1", 1);
+  CSP_REQUIRE(plan.outcome == PlanOutcome::Planned);
+  Result<PlanStore> opened = PlanStore::open(options_for(scratch.path()));
+  CSP_REQUIRE(opened.has_value());
+  PlanStore store = std::move(opened).value();
+
+  // The content was changed after the plan was sealed. Loading verifies the digest, so
+  // a store that published this plan would hold a record it could never hand back.
+  PlacementPlan altered = plan;
+  altered.nodes_explored += 1;
+  Result<PlanId> refused = store.commit(altered);
+  CSP_EXPECT(!refused.has_value());
+  if (!refused.has_value()) {
+    CSP_EXPECT(refused.error().category() == ErrorCategory::Integrity);
+    CSP_EXPECT_EQ(refused.error().code(), std::string("csp.store.digest_mismatch"));
+  }
+  CSP_EXPECT(!store.generation().is_set());
+
+  // The plan as it was sealed is published and read back.
+  CSP_REQUIRE(store.commit(plan).has_value());
+  CSP_EXPECT(store.load(plan.plan).has_value());
+  CSP_EXPECT_OK(store.close());
+}
+
+CSP_TEST(persistence, identities_that_differ_only_in_case_do_not_share_a_record) {
+  ScratchDirectory scratch("identity-case");
+  // The identity is not part of the digest, so each plan still matches its own.
+  PlacementPlan upper = plan_one("request-1", "obligation-1", 1);
+  PlacementPlan lower = plan_one("request-2", "obligation-2", 2);
+  CSP_REQUIRE(upper.outcome == PlanOutcome::Planned);
+  CSP_REQUIRE(lower.outcome == PlanOutcome::Planned);
+  upper.plan = plan_id("Plan-Case-1");
+  lower.plan = plan_id("plan-case-1");
+  {
+    Result<PlanStore> opened = PlanStore::open(options_for(scratch.path()));
+    CSP_REQUIRE(opened.has_value());
+    PlanStore store = std::move(opened).value();
+    CSP_REQUIRE(store.commit(upper).has_value());
+
+    // An identity is a file name, and on a case-insensitive filesystem these two are one
+    // file: the second record would replace the first while the manifest still vouched
+    // for the first.
+    Result<PlanId> second = store.commit(lower);
+    CSP_EXPECT(!second.has_value());
+    if (!second.has_value()) {
+      CSP_EXPECT(second.error().category() == ErrorCategory::Conflict);
+      CSP_EXPECT_EQ(second.error().code(), std::string("csp.store.identity_case"));
+    }
+    CSP_EXPECT_OK(store.close());
+  }
+  Result<PlanStore> reopened = PlanStore::open(options_for(scratch.path()));
+  CSP_REQUIRE(reopened.has_value());
+  PlanStore store = std::move(reopened).value();
+  Result<PlacementPlan> loaded = store.load(upper.plan);
+  CSP_REQUIRE(loaded.has_value());
+  CSP_EXPECT_EQ(canonical(loaded.value()), canonical(upper));
+  CSP_EXPECT_OK(store.close());
+}

@@ -180,6 +180,21 @@ Status note_unreferenced(const std::string& records_path, const detail::Manifest
   return success();
 }
 
+/// True when two identities differ at most in the case of their letters. The identity
+/// alphabet is ASCII, so the comparison is too.
+bool same_ignoring_case(const std::string& lhs, const std::string& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  const auto fold = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; };
+  for (std::size_t index = 0; index < lhs.size(); ++index) {
+    if (fold(lhs[index]) != fold(rhs[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 Status find_record(const std::vector<detail::RecordEntry>& records, const PlanId& plan,
                    const detail::RecordEntry** out) {
   *out = nullptr;
@@ -304,7 +319,10 @@ Result<PlanId> PlanStore::commit_if_generation(const PlacementPlan& plan, Genera
   if (!payload) {
     return payload.error();
   }
-  if (payload.value().size() > impl.limits.max_store_record_bytes) {
+  // The document is read back under max_document_bytes when the plan is loaded, so a
+  // document above either bound is one the store could publish and never return.
+  if (payload.value().size() > impl.limits.max_store_record_bytes ||
+      payload.value().size() > impl.limits.max_document_bytes) {
     return fail(ErrorCategory::BoundExceeded, "csp.store.record_too_large",
                 "the plan encodes to more bytes than the configured record bound allows");
   }
@@ -320,16 +338,19 @@ Result<PlanId> PlanStore::commit_if_generation(const PlacementPlan& plan, Genera
   if (!manifest) {
     return manifest.error();
   }
-  const Generation current = Generation::from_value(manifest.value().generation);
+  // The manifest just read under the lock is the store as it stands, so this handle's
+  // own copy is brought up to it whatever the commit goes on to decide. The copy used to
+  // move only when this handle published something itself: after another handle or
+  // process had published, generation() kept reporting the old generation, and a commit
+  // conditional on the generation the handle reported was refused as stale every time.
+  impl.generation = Generation::from_value(manifest.value().generation);
+  impl.records = manifest.value().records;
+  const Generation current = impl.generation;
   if (expected.is_set() && current != expected) {
     return fail(ErrorCategory::Stale, "csp.store.generation_mismatch",
                 "the caller expected generation " + std::to_string(expected.value()) +
                     " and the store is at " + std::to_string(current.value()) +
                     "; nothing was written");
-  }
-  if (manifest.value().records.size() >= impl.limits.max_store_records) {
-    return fail(ErrorCategory::BoundExceeded, "csp.store.too_many_records",
-                "the store already holds the configured maximum number of records");
   }
 
   const detail::RecordEntry* existing = nullptr;
@@ -360,6 +381,34 @@ Result<PlanId> PlanStore::commit_if_generation(const PlacementPlan& plan, Genera
     return sealed.plan;
   }
 
+  // Everything below publishes a new record. The count bound is checked here, after the
+  // repeat above, so that committing a plan a full store already holds is answered as
+  // the repeat it is.
+  if (manifest.value().records.size() >= impl.limits.max_store_records) {
+    return fail(ErrorCategory::BoundExceeded, "csp.store.too_many_records",
+                "the store already holds the configured maximum number of records");
+  }
+
+  // Loading verifies the plan against its digest. A plan whose content was changed
+  // after it was sealed would be published as a record the store can never hand back.
+  if (plan_compute_digest(sealed) != sealed.digest) {
+    return fail(ErrorCategory::Integrity, "csp.store.digest_mismatch",
+                "the plan's digest does not match its content; it was changed after it was sealed, and "
+                "nothing was written");
+  }
+
+  // An identity is a file name. On a case-insensitive filesystem two identities that
+  // differ only in case are one file, so the second record would replace the first while
+  // the manifest still vouched for the first, and the store would not open again.
+  for (const detail::RecordEntry& entry : manifest.value().records) {
+    if (same_ignoring_case(entry.plan.value(), sealed.plan.value())) {
+      return fail(ErrorCategory::Conflict, "csp.store.identity_case",
+                  "the store already holds a plan under identity " + entry.plan.value() +
+                      ", which differs from " + sealed.plan.value() +
+                      " only in case; the two would share one record file");
+    }
+  }
+
   const Result<Generation> next = current.next();
   if (!next) {
     return next.error();
@@ -368,10 +417,13 @@ Result<PlanId> PlanStore::commit_if_generation(const PlacementPlan& plan, Genera
   if (!record) {
     return record.error();
   }
-  const std::string record_path = join_path(impl.records_path, detail::record_file_name(sealed.plan));
-  status = detail::write_file_durable(record_path, record.value());
-  if (!status) {
-    return status.error();
+  // Every open and every commit reads each record file, header and document together,
+  // under max_store_record_bytes. Only the document used to be measured, so a document
+  // within a header's length of the bound was written as a record the store refused to
+  // read from then on.
+  if (record.value().size() > impl.limits.max_store_record_bytes) {
+    return fail(ErrorCategory::BoundExceeded, "csp.store.record_too_large",
+                "the plan's record, header included, is more bytes than the configured record bound allows");
   }
 
   detail::Manifest updated = manifest.value();
@@ -388,6 +440,32 @@ Result<PlanId> PlanStore::commit_if_generation(const PlacementPlan& plan, Genera
   if (!encoded) {
     return encoded.error();
   }
+  // The manifest is read under max_document_bytes. One that has outgrown that bound
+  // would be the last thing this store ever published.
+  if (encoded.value().size() > impl.limits.max_document_bytes) {
+    return fail(ErrorCategory::BoundExceeded, "csp.store.manifest_too_large",
+                "the manifest with this record in it is more bytes than the configured document bound allows; "
+                "nothing was written");
+  }
+
+  const std::string record_path = join_path(impl.records_path, detail::record_file_name(sealed.plan));
+  status = detail::write_file_durable(record_path, record.value());
+  if (!status) {
+    return status.error();
+  }
+  // The protocol publishes a record only once it has been read back and found to be what
+  // was written. Without this step a short or damaged write would be referenced by the
+  // manifest and refused by every later open.
+  {
+    Result<std::string> stored = detail::read_file_bounded(record_path, impl.limits.max_store_record_bytes);
+    if (!stored || stored.value() != record.value()) {
+      (void)detail::remove_file(record_path);
+      return fail(ErrorCategory::Integrity, "csp.store.record_readback",
+                  "the record for plan " + sealed.plan.value() +
+                      " did not read back as it was written; it was removed and nothing was published");
+    }
+  }
+
   status = detail::write_file_durable(impl.manifest_path, encoded.value());
   if (!status) {
     return status.error();
@@ -408,6 +486,38 @@ Result<PlacementPlan> PlanStore::load(const PlanId& plan) const {
   const Status status = find_record(impl.records, plan, &entry);
   if (!status) {
     return status.error();
+  }
+  if (entry == nullptr) {
+    // This handle's copy of the manifest is as old as the last time the handle read it.
+    // A plan published since, through another handle or by another process, is in the
+    // store, so the manifest is read again before the plan is reported as unknown.
+    {
+      Result<detail::FileLock> lock = detail::FileLock::acquire(impl.lock_path, impl.lock_options);
+      if (!lock) {
+        return lock.error();
+      }
+      if (detail::file_exists(impl.manifest_path)) {
+        Result<std::string> manifest_bytes =
+            detail::read_file_bounded(impl.manifest_path, impl.limits.max_document_bytes);
+        if (!manifest_bytes) {
+          return manifest_bytes.error();
+        }
+        Result<detail::Manifest> manifest = detail::decode_manifest(manifest_bytes.value());
+        if (!manifest) {
+          return manifest.error();
+        }
+        if (manifest.value().records.size() > impl.limits.max_store_records) {
+          return fail(ErrorCategory::BoundExceeded, "csp.store.too_many_records",
+                      "the manifest references more records than the configured bound allows");
+        }
+        impl.generation = Generation::from_value(manifest.value().generation);
+        impl.records = manifest.value().records;
+      }
+    }
+    const Status refreshed = find_record(impl.records, plan, &entry);
+    if (!refreshed) {
+      return refreshed.error();
+    }
   }
   if (entry == nullptr) {
     return fail(ErrorCategory::NotFound, "csp.store.unknown_plan", "the store holds no plan " + plan.value());
